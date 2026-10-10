@@ -15,6 +15,7 @@ from .timeouts import call_with_timeout
 
 CALLSIGN_PATTERNS = ("n123sq", "123sq", "sierra quebec", "three sierra quebec")
 RUNWAY_PATTERNS = ("two seven", "27", "two-seven")
+DEFAULT_MODELS = "gemini-3.5-flash-lite,gemini-3.8-flash"
 
 SYSTEM_PROMPT = """You are two people at once for a student pilot radio-practice app:
 1. A strict but fair FAA-style radio phraseology GRADER.
@@ -100,16 +101,22 @@ def _call_gemini(transcript: str, phase: str, role: str, want_reply: bool,
         "wantReply": want_reply,
         "recentRadioTraffic": history,
     })
-    response = client.models.generate_content(
-        model=env("GEMINI_MODEL", "gemini-2.5-flash"),
-        contents=user_prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            response_mime_type="application/json",
-            temperature=0.3,
-        ),
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        response_mime_type="application/json",
+        temperature=0.3,
     )
-    return _extract_json(response.text or "")
+    # GEMINI_MODEL may be a comma-separated chain: busy (503) or retired (404)
+    # models are skipped, all within the caller's single timeout budget.
+    models = [m.strip() for m in env("GEMINI_MODEL", DEFAULT_MODELS).split(",") if m.strip()]
+    last_error: Exception | None = None
+    for model in models:
+        try:
+            response = client.models.generate_content(model=model, contents=user_prompt, config=config)
+            return _extract_json(response.text or "")
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(f"all Gemini models failed: {last_error}")
 
 
 def _clean(raw: dict[str, Any], fallback: dict[str, Any], role: str, want_reply: bool) -> dict[str, Any]:
