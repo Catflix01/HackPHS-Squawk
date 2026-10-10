@@ -24,8 +24,8 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import config
-from .scenario import normalize_phase, phase_info
-from .services.llm import grade_transmission
+from .scenario import normalize_phase
+from .services.llm import expected_call, grade_transmission
 from .services.stt import transcribe_audio
 from .services.tts import synthesize_speech
 from .sessions import ROLES, hub
@@ -164,16 +164,15 @@ def transmit(
     mode = hub.mode(sessionId)
     want_reply = mode == "ai" and role == "pilot"
 
-    if config.demo_mode():
-        info = phase_info(phase)
-        transcript: str | None = info["atcReply"] if role == "atc" else info["expectedCall"]
-    else:
-        transcript = transcribe_audio(audio_bytes, mime_type)
-
     history = [
         {"speaker": tx["speaker"], "phase": tx["phase"], "transcript": tx["transcript"]}
         for tx in store.recent(sessionId)
     ]
+    if config.demo_mode():
+        transcript: str | None = expected_call(phase, role, history)
+    else:
+        transcript = transcribe_audio(audio_bytes, mime_type)
+
     grade = grade_transmission(transcript, phase, role, want_reply=want_reply, history=history)
 
     doc = _save_transmission(

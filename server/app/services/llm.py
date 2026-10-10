@@ -25,14 +25,14 @@ The training scenario (airport, runway, frequency, callsign, expected calls per 
 {scenario}
 
 Grading rules:
-- Grade the given transmission against the scenario's expected call for the current phase.
-  If the previous transmission was a tower instruction, the pilot should be reading it back:
-  grade against the expected readback instead.
-- For speaker "atc" (a human controller), grade against "atcExpected" for the phase.
+- Grade the transmission against "gradeAgainst" in the request (already chosen for you: the
+  initial call, the readback of the last tower instruction, or the controller's expected
+  instruction). Use "recentRadioTraffic" only as context. For speaker "atc" (a human controller)
+  also consider the phase's "atcExpected".
 - score: integer 0-100. Correct content with minor wording differences should still score 85+.
 - issues: short, specific strings (max 4), e.g. "Missing callsign", "Did not read back hold short".
-  Empty list if the call is good.
-- expectedCall: the exact call you graded against, in standard phraseology.
+  Empty list if the call is good. Only list real mistakes in THIS transmission; never penalize
+  for instructions that have not been given yet or for natural pauses.
 - cfiAlert: ONLY for speaker "pilot" and ONLY for safety-relevant mistakes (see each phase's
   "safetyCritical" list: missing hold-short readback, wrong runway, taking off or landing or
   crossing a runway without a clearance, wrong pattern direction). Write one or two calm
@@ -42,10 +42,12 @@ Grading rules:
 Tower rules (only when wantReply is true):
 - atcReply: what {tower} says next on frequency, short real-world FAA phraseology, using the
   scenario's runway and callsign. If the pilot's call was unreadable or wrong, respond like a real
-  controller would (e.g. "...say again" or correct the error). When wantReply is false, atcReply is null.
+  controller would (e.g. "...say again" or correct the error). If the transmission is a correct
+  readback, atcReply is null (towers do not answer correct readbacks). When wantReply is false,
+  atcReply is null.
 
 Respond with JSON only:
-{{"score": int, "issues": [string], "expectedCall": string, "cfiAlert": string|null, "atcReply": string|null}}"""
+{{"score": int, "issues": [string], "cfiAlert": string|null, "atcReply": string|null}}"""
 
 
 def _mentions(text: str, patterns: tuple[str, ...]) -> bool:
@@ -53,10 +55,26 @@ def _mentions(text: str, patterns: tuple[str, ...]) -> bool:
     return any(pattern in lowered for pattern in patterns)
 
 
-def fallback_grade(transcript: str | None, phase: str, role: str, want_reply: bool) -> dict[str, Any]:
+def is_readback(phase: str, role: str, history: list[dict[str, Any]]) -> bool:
+    """A pilot call right after a tower transmission in the same phase is a readback."""
+    if role != "pilot" or not history:
+        return False
+    last = history[-1]
+    return last.get("speaker") in ("atc", "ai_atc") and last.get("phase") == phase
+
+
+def expected_call(phase: str, role: str, history: list[dict[str, Any]]) -> str:
+    info = phase_info(phase)
+    if role == "atc":
+        return info["atcReply"]
+    return info["expectedReadback"] if is_readback(phase, role, history) else info["expectedCall"]
+
+
+def fallback_grade(transcript: str | None, phase: str, role: str, want_reply: bool,
+                   history: list[dict[str, Any]]) -> dict[str, Any]:
     """Canned reply plus a rough keyword-based placeholder score."""
     info = phase_info(phase)
-    expected = info["atcReply"] if role == "atc" else info["expectedCall"]
+    readback = is_readback(phase, role, history)
     issues: list[str] = []
 
     if transcript is None:
@@ -65,16 +83,16 @@ def fallback_grade(transcript: str | None, phase: str, role: str, want_reply: bo
     else:
         if not _mentions(transcript, CALLSIGN_PATTERNS):
             issues.append("Missing callsign (Cessna one two three Sierra Quebec).")
-        if phase != "taxi" and not _mentions(transcript, RUNWAY_PATTERNS):
+        if (phase != "taxi" or readback) and not _mentions(transcript, RUNWAY_PATTERNS):
             issues.append("Missing runway (two seven).")
         score = max(40, 100 - 20 * len(issues))
 
     return {
         "score": score,
         "issues": issues,
-        "expectedCall": expected,
+        "expectedCall": expected_call(phase, role, history),
         "cfiAlert": None,
-        "atcReply": info["atcReply"] if want_reply else None,
+        "atcReply": info["atcReply"] if want_reply and not readback else None,
     }
 
 
@@ -87,7 +105,7 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 
 def _call_gemini(transcript: str, phase: str, role: str, want_reply: bool,
-                 history: list[dict[str, Any]]) -> dict[str, Any]:
+                 history: list[dict[str, Any]], grade_against: str) -> dict[str, Any]:
     scenario = load_scenario()
     client = genai.Client(api_key=env("GEMINI_API_KEY"))
     system_prompt = SYSTEM_PROMPT.format(
@@ -98,6 +116,7 @@ def _call_gemini(transcript: str, phase: str, role: str, want_reply: bool,
         "phase": phase,
         "speaker": role,
         "transcript": transcript,
+        "gradeAgainst": grade_against,
         "wantReply": want_reply,
         "recentRadioTraffic": history,
     })
@@ -129,9 +148,9 @@ def _clean(raw: dict[str, Any], fallback: dict[str, Any], role: str, want_reply:
     return {
         "score": score,
         "issues": [str(item) for item in raw.get("issues") or []][:4],
-        "expectedCall": str(raw.get("expectedCall") or "").strip() or fallback["expectedCall"],
+        "expectedCall": fallback["expectedCall"],
         "cfiAlert": str(cfi).strip() if cfi and role == "pilot" else None,
-        "atcReply": (reply or fallback["atcReply"]) if want_reply else None,
+        "atcReply": (reply or fallback["atcReply"]) if want_reply else None,  # None after a readback
     }
 
 
@@ -147,11 +166,14 @@ def grade_transmission(
     Returns {"score", "issues", "expectedCall", "cfiAlert", "atcReply"}.
     """
     phase = normalize_phase(phase)
-    fallback = fallback_grade(transcript, phase, role, want_reply)
+    history = history or []
+    fallback = fallback_grade(transcript, phase, role, want_reply, history)
     if demo_mode() or transcript is None or not env("GEMINI_API_KEY"):
         return fallback
 
-    raw = call_with_timeout("Gemini", _call_gemini, transcript, phase, role, want_reply, history or [])
+    raw = call_with_timeout(
+        "Gemini", _call_gemini, transcript, phase, role, want_reply, history, fallback["expectedCall"]
+    )
     if not isinstance(raw, dict):
         return fallback
     return _clean(raw, fallback, role, want_reply)
