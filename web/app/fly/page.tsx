@@ -36,11 +36,12 @@ type ServerMessage = {
 
 const PHASES: FlightPhase[] = ["taxi", "takeoff", "pattern", "landing"];
 const PHASE_GAIN: Record<FlightPhase, { engine: number; wind: number }> = {
-  taxi: { engine: 0.18, wind: 0.05 },
-  takeoff: { engine: 0.55, wind: 0.3 },
-  pattern: { engine: 0.34, wind: 0.18 },
-  landing: { engine: 0.2, wind: 0.1 },
+  taxi: { engine: 0.25, wind: 0 },
+  takeoff: { engine: 0.7, wind: 0 },
+  pattern: { engine: 0.45, wind: 0 },
+  landing: { engine: 0.3, wind: 0 },
 };
+const COCKPIT_AUDIO = "/audio/cockpit1.mp3";
 const serverBaseUrl = process.env.NEXT_PUBLIC_SERVER_URL ?? "http://localhost:8000";
 const wsBaseUrl = serverBaseUrl.replace(/^http/i, "ws");
 
@@ -78,6 +79,10 @@ export default function FlyPage() {
   const engineGainRef = useRef<GainNode | null>(null);
   const windGainRef = useRef<GainNode | null>(null);
   const noiseAudioRef = useRef<HTMLAudioElement[]>([]);
+  const playQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const queueGenerationRef = useRef(0);
+  const stopCurrentClipRef = useRef<(() => void) | null>(null);
+  const playedIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -113,39 +118,64 @@ export default function FlyPage() {
     if (context.state === "suspended") await context.resume();
     if (noiseAudioRef.current.length > 0) return;
 
-    const engine = new Audio("/audio/engine.mp3");
-    const wind = new Audio("/audio/wind.mp3");
-    engine.loop = true;
-    wind.loop = true;
-    engine.crossOrigin = "anonymous";
-    wind.crossOrigin = "anonymous";
-    const engineGain = context.createGain();
-    const windGain = context.createGain();
-    engineGainRef.current = engineGain;
-    windGainRef.current = windGain;
-    context.createMediaElementSource(engine).connect(engineGain).connect(context.destination);
-    context.createMediaElementSource(wind).connect(windGain).connect(context.destination);
-    noiseAudioRef.current = [engine, wind];
+    const cockpit = new Audio(COCKPIT_AUDIO);
+    cockpit.loop = true;
+    cockpit.crossOrigin = "anonymous";
+    const cockpitGain = context.createGain();
+    engineGainRef.current = cockpitGain;
+    windGainRef.current = null;
+    context.createMediaElementSource(cockpit).connect(cockpitGain).connect(context.destination);
+    noiseAudioRef.current = [cockpit];
     setNoiseGain(phaseRef.current);
-    await Promise.allSettled([engine.play(), wind.play()]);
+    await cockpit.play().catch(() => undefined);
   }, [role, setNoiseGain]);
 
-  const playReceivedAudio = useCallback(
-    async (audioBase64: string | null | undefined, mimeType = "audio/mpeg") => {
-      if (!audioBase64) return;
-      const audio = new Audio(`data:${mimeType};base64,${audioBase64}`);
-      setNoiseGain(phaseRef.current, true);
-      send({ type: "rx", state: "started" });
-      await audio.play();
-      await new Promise<void>((resolve) => {
-        audio.onended = () => resolve();
-        audio.onerror = () => resolve();
-      });
-      send({ type: "rx", state: "stopped" });
-      setNoiseGain(phaseRef.current);
-    },
+  // Plays one clip; resolves when it ends, errors, or is stopped by PTT.
+  const playClip = useCallback(
+    (audioBase64: string, mimeType: string) =>
+      new Promise<void>((resolve) => {
+        const audio = new Audio(`data:${mimeType};base64,${audioBase64}`);
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          audio.onended = null;
+          audio.onerror = null;
+          audio.pause();
+          if (stopCurrentClipRef.current === finish) stopCurrentClipRef.current = null;
+          send({ type: "rx", state: "stopped" });
+          setNoiseGain(phaseRef.current);
+          resolve();
+        };
+        stopCurrentClipRef.current = finish;
+        audio.onended = finish;
+        audio.onerror = finish;
+        setNoiseGain(phaseRef.current, true);
+        send({ type: "rx", state: "started" });
+        audio.play().catch(finish);
+      }),
     [send, setNoiseGain],
   );
+
+  // Radio audio plays one clip at a time, in arrival order.
+  const enqueueAudio = useCallback(
+    (audioBase64: string | null | undefined, mimeType = "audio/mpeg") => {
+      if (!audioBase64) return;
+      const generation = queueGenerationRef.current;
+      playQueueRef.current = playQueueRef.current
+        .then(() => {
+          if (generation !== queueGenerationRef.current) return; // queue was cleared
+          return playClip(audioBase64, mimeType);
+        })
+        .catch(() => undefined);
+    },
+    [playClip],
+  );
+
+  const stopPlayback = useCallback(() => {
+    queueGenerationRef.current += 1;
+    stopCurrentClipRef.current?.();
+  }, []);
 
   const startRecording = useCallback(async () => {
     if (!streamRef.current || recording || releasePendingRef.current) return;
@@ -187,13 +217,14 @@ export default function FlyPage() {
 
   const pressPtt = useCallback(() => {
     if (!flightStarted || freqHolder && freqHolder !== role || pttPendingRef.current || recording) return;
+    stopPlayback(); // talking cuts off (and drops) any queued radio audio
     pttPendingRef.current = true;
     releasePendingRef.current = false;
     send({ type: "ptt.down" });
     startTimerRef.current = setTimeout(() => {
       if (pttPendingRef.current && !releasePendingRef.current) void startRecording();
     }, 120);
-  }, [flightStarted, freqHolder, recording, role, send, startRecording]);
+  }, [flightStarted, freqHolder, recording, role, send, startRecording, stopPlayback]);
 
   const releasePtt = useCallback(() => {
     if (!pttPendingRef.current && !recording) return;
@@ -251,14 +282,12 @@ export default function FlyPage() {
       .catch(() => setWarnings((current) => [
         ...new Set([...current, ...detectedWarnings, "Server is unreachable. Start the FastAPI server before transmitting."]),
       ]));
-    Promise.all([fetch("/audio/engine.mp3", { method: "HEAD" }), fetch("/audio/wind.mp3", { method: "HEAD" })])
-      .then(([engine, wind]) => {
-        const missing = [
-          !engine.ok && "engine.mp3 missing, add it to /web/public/audio/engine.mp3",
-          !wind.ok && "wind.mp3 missing, add it to /web/public/audio/wind.mp3",
-        ].filter((item): item is string => Boolean(item));
-        setWarnings((current) => [...new Set([...current, ...missing])]);
-      });
+    const cockpitMissing = "cockpit1.mp3 missing, add it to /web/public/audio/cockpit1.mp3";
+    fetch(COCKPIT_AUDIO, { method: "HEAD" })
+      .then((response) => {
+        if (!response.ok) setWarnings((current) => [...new Set([...current, cockpitMissing])]);
+      })
+      .catch(() => setWarnings((current) => [...new Set([...current, cockpitMissing])]));
   }, []);
 
   useEffect(() => {
@@ -309,12 +338,19 @@ export default function FlyPage() {
             score: data.score,
             issues: data.issues ?? [],
           };
-          setEntries((current) => [...current, entry]);
+          setEntries((current) =>
+            current.some((item) => item.id === entry.id) ? current : [...current, entry],
+          );
           if (entry.speaker === "ai_atc") setAwaitingTower(false);
-          if (entry.speaker !== role) void playReceivedAudio(data.audioBase64, data.mimeType);
+          // Never play your own voice; the controller never hears the AI tower (that's "their" voice).
+          const shouldPlay = entry.speaker !== role && !(role === "atc" && entry.speaker === "ai_atc");
+          if (shouldPlay && !playedIdsRef.current.has(entry.id)) {
+            playedIdsRef.current.add(entry.id);
+            enqueueAudio(data.audioBase64, data.mimeType);
+          }
         } else if (data.type === "cfi.alert" && role === "pilot") {
           if (data.text) setCfiAlerts((current) => [...current, data.text as string]);
-          void playReceivedAudio(data.audioBase64, data.mimeType);
+          enqueueAudio(data.audioBase64, data.mimeType);
         }
       };
     };
@@ -324,7 +360,7 @@ export default function FlyPage() {
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
       wsRef.current?.close();
     };
-  }, [playReceivedAudio, role, sessionId]);
+  }, [enqueueAudio, role, sessionId]);
 
   useEffect(() => {
     setNoiseGain(phase, false);
