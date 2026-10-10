@@ -12,11 +12,11 @@ type Debrief = {
     phase: string;
     transcript: string;
     expectedCall: string;
-    score: number;
+    score: number | null;
     issues: string[];
     createdAt: string;
   }>;
-  cfiAlerts: string[];
+  cfiAlerts: { id: string; transmissionId: string; phase: string; text: string; createdAt: string }[];
 };
 
 const serverBaseUrl = process.env.NEXT_PUBLIC_SERVER_URL ?? "http://localhost:8000";
@@ -47,12 +47,12 @@ export default function DebriefPage() {
           {debrief && <p className="mt-3 font-mono text-2xl text-green-300">Average score: {debrief.averageScore}</p>}
         </header>
         {error && <div className="rounded-xl border border-red-400/50 bg-red-500/10 p-4 text-red-200">{error}</div>}
-        {debrief?.cfiAlerts.map((alert, index) => <div key={`${alert}-${index}`} className="rounded-xl border border-amber-300/50 bg-amber-300/10 p-4 text-amber-100"><strong>CFI:</strong> {alert}</div>)}
+        {debrief?.cfiAlerts.map((alert) => <div key={alert.id} className="rounded-xl border border-amber-300/50 bg-amber-300/10 p-4 text-amber-100"><strong>CFI ({alert.phase}):</strong> {alert.text}</div>)}
         {debrief?.transmissions.map((call) => (
           <article key={call.id} className="rounded-2xl border border-sky-400/20 bg-slate-900 p-4">
-            <div className="flex flex-wrap justify-between gap-2 text-xs font-mono text-slate-400"><span>{call.speaker.toUpperCase()} · {call.phase}</span><span className={call.score >= 80 ? "text-green-300" : "text-amber-300"}>Score {call.score}</span></div>
+            <div className="flex flex-wrap justify-between gap-2 text-xs font-mono text-slate-400"><span>{call.speaker.toUpperCase()} · {call.phase}</span>{typeof call.score === "number" && <span className={call.score >= 80 ? "text-green-300" : "text-amber-300"}>Score {call.score}</span>}</div>
             <p className="mt-3 text-lg">{call.transcript}</p>
-            <p className="mt-2 text-sm text-sky-200">Expected: {call.expectedCall}</p>
+            {call.expectedCall && <p className="mt-2 text-sm text-sky-200">Expected: {call.expectedCall}</p>}
             {call.issues.length > 0 && <ul className="mt-2 list-disc pl-5 text-sm text-amber-200">{call.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
           </article>
         ))}

@@ -36,10 +36,10 @@ type ServerMessage = {
 
 const PHASES: FlightPhase[] = ["taxi", "takeoff", "pattern", "landing"];
 const PHASE_GAIN: Record<FlightPhase, { engine: number; wind: number }> = {
-  taxi: { engine: 0.25, wind: 0 },
-  takeoff: { engine: 0.7, wind: 0 },
-  pattern: { engine: 0.45, wind: 0 },
-  landing: { engine: 0.3, wind: 0 },
+  taxi: { engine: 0.4, wind: 0.3 },
+  takeoff: { engine: 1.0, wind: 0.5 },
+  pattern: { engine: 0.7, wind: 0.4 },
+  landing: { engine: 0.5, wind: 0.3 },
 };
 const COCKPIT_AUDIO = "/audio/cockpit1.mp3";
 const serverBaseUrl = process.env.NEXT_PUBLIC_SERVER_URL ?? "http://localhost:8000";
@@ -83,6 +83,8 @@ export default function FlyPage() {
   const queueGenerationRef = useRef(0);
   const stopCurrentClipRef = useRef<(() => void) | null>(null);
   const playedIdsRef = useRef<Set<string>>(new Set());
+  const receivingRef = useRef(false);
+  const awaitingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -130,44 +132,85 @@ export default function FlyPage() {
     await cockpit.play().catch(() => undefined);
   }, [role, setNoiseGain]);
 
-  // Plays one clip; resolves when it ends, errors, or is stopped by PTT.
+  // Plays one clip. ALWAYS resolves (ended, error, play() rejected, stopped by PTT, or the
+  // watchdog fires) so one bad clip can never block the clips queued behind it.
   const playClip = useCallback(
-    (audioBase64: string, mimeType: string) =>
+    (audioBase64: string, mimeType: string, label: string) =>
       new Promise<void>((resolve) => {
-        const audio = new Audio(`data:${mimeType};base64,${audioBase64}`);
+        let audio: HTMLAudioElement;
+        try {
+          audio = new Audio(`data:${mimeType};base64,${audioBase64}`);
+        } catch (error) {
+          console.warn(`[radio] could not create audio for ${label}`, error);
+          resolve();
+          return;
+        }
         let finished = false;
+        let watchdog = setTimeout(() => {
+          console.warn(`[radio] ${label} never finished loading/playing; skipping it`);
+          finish();
+        }, 30000);
         const finish = () => {
           if (finished) return;
           finished = true;
+          clearTimeout(watchdog);
           audio.onended = null;
           audio.onerror = null;
+          audio.onloadedmetadata = null;
           audio.pause();
           if (stopCurrentClipRef.current === finish) stopCurrentClipRef.current = null;
+          receivingRef.current = false;
           send({ type: "rx", state: "stopped" });
           setNoiseGain(phaseRef.current);
           resolve();
         };
         stopCurrentClipRef.current = finish;
         audio.onended = finish;
-        audio.onerror = finish;
+        audio.onerror = () => {
+          console.warn(`[radio] ${label} failed to decode/play (${mimeType})`, audio.error);
+          finish();
+        };
+        audio.onloadedmetadata = () => {
+          if (!Number.isFinite(audio.duration)) return;
+          clearTimeout(watchdog);
+          watchdog = setTimeout(() => {
+            console.warn(`[radio] ${label} did not fire "ended"; moving on`);
+            finish();
+          }, (audio.duration + 3) * 1000);
+        };
+        receivingRef.current = true;
         setNoiseGain(phaseRef.current, true);
         send({ type: "rx", state: "started" });
-        audio.play().catch(finish);
+        audio.play().catch((error: unknown) => {
+          const name = error instanceof Error ? error.name : String(error);
+          console.warn(`[radio] play() rejected for ${label}: ${name}`, error);
+          if (name === "NotAllowedError") {
+            setWarnings((current) => [
+              ...new Set([...current, "The browser blocked radio audio. Click Start flight (or anywhere on the page) and try again."]),
+            ]);
+          }
+          finish();
+        });
       }),
     [send, setNoiseGain],
   );
 
   // Radio audio plays one clip at a time, in arrival order.
   const enqueueAudio = useCallback(
-    (audioBase64: string | null | undefined, mimeType = "audio/mpeg") => {
-      if (!audioBase64) return;
+    (audioBase64: string | null | undefined, mimeType = "audio/mpeg", label = "clip") => {
+      if (!audioBase64) {
+        console.warn(`[radio] ${label} arrived without audio (server TTS failed or DEMO_MODE); showing text only`);
+        return;
+      }
       const generation = queueGenerationRef.current;
       playQueueRef.current = playQueueRef.current
-        .then(() => {
-          if (generation !== queueGenerationRef.current) return; // queue was cleared
-          return playClip(audioBase64, mimeType);
+        .then(async () => {
+          if (generation !== queueGenerationRef.current) return; // queue was cleared by PTT
+          const context = audioContextRef.current;
+          if (context?.state === "suspended") await context.resume().catch(() => undefined);
+          await playClip(audioBase64, mimeType, label);
         })
-        .catch(() => undefined);
+        .catch((error: unknown) => console.warn(`[radio] queue error for ${label}`, error));
     },
     [playClip],
   );
@@ -207,7 +250,12 @@ export default function FlyPage() {
     try {
       const response = await fetch(`${serverBaseUrl}/transmit`, { method: "POST", body: formData });
       if (!response.ok) throw new Error(`Transmit failed (${response.status})`);
-      if (role === "pilot" && mode === "ai") setAwaitingTower(true);
+      if (role === "pilot" && mode === "ai") {
+        // The tower may legitimately stay silent (correct readback), so never spin forever.
+        setAwaitingTower(true);
+        if (awaitingTimerRef.current) clearTimeout(awaitingTimerRef.current);
+        awaitingTimerRef.current = setTimeout(() => setAwaitingTower(false), 10000);
+      }
     } catch (error) {
       setWarnings((current) => [
         ...new Set([...current, error instanceof Error ? error.message : "Transmit failed."]),
@@ -273,9 +321,12 @@ export default function FlyPage() {
         if (!response.ok) throw new Error("Unable to reach server health endpoint.");
         return response.json();
       })
-      .then((payload: { missingEnv?: unknown }) => {
+      .then((payload: { missingEnv?: unknown; demoMode?: unknown }) => {
         if (Array.isArray(payload.missingEnv) && payload.missingEnv.length > 0) {
           detectedWarnings.push(`Server env missing: ${payload.missingEnv.join(", ")}.`);
+        }
+        if (payload.demoMode === true) {
+          detectedWarnings.push("Server DEMO_MODE is on: tower replies are text only (no voice).");
         }
         setWarnings((current) => [...new Set([...current, ...detectedWarnings])]);
       })
@@ -341,16 +392,19 @@ export default function FlyPage() {
           setEntries((current) =>
             current.some((item) => item.id === entry.id) ? current : [...current, entry],
           );
-          if (entry.speaker === "ai_atc") setAwaitingTower(false);
+          if (entry.speaker === "ai_atc") {
+            setAwaitingTower(false);
+            if (awaitingTimerRef.current) clearTimeout(awaitingTimerRef.current);
+          }
           // Never play your own voice; the controller never hears the AI tower (that's "their" voice).
           const shouldPlay = entry.speaker !== role && !(role === "atc" && entry.speaker === "ai_atc");
           if (shouldPlay && !playedIdsRef.current.has(entry.id)) {
             playedIdsRef.current.add(entry.id);
-            enqueueAudio(data.audioBase64, data.mimeType);
+            enqueueAudio(data.audioBase64, data.mimeType, `${entry.speaker} ${entry.id.slice(0, 6)}`);
           }
         } else if (data.type === "cfi.alert" && role === "pilot") {
           if (data.text) setCfiAlerts((current) => [...current, data.text as string]);
-          enqueueAudio(data.audioBase64, data.mimeType);
+          enqueueAudio(data.audioBase64, data.mimeType, "cfi.alert");
         }
       };
     };
@@ -363,7 +417,7 @@ export default function FlyPage() {
   }, [enqueueAudio, role, sessionId]);
 
   useEffect(() => {
-    setNoiseGain(phase, false);
+    setNoiseGain(phase, receivingRef.current);
   }, [phase, setNoiseGain]);
 
   useEffect(() => {
