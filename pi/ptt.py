@@ -1,10 +1,5 @@
-"""Raspberry Pi push-to-talk client for Squawk.
+# Raspberry Pi push-to-talk client for Squawk.
 
-Button wiring:
-- GPIO17
-- Internal pull-up enabled
-- Press = transmit start, release = transmit stop
-"""
 
 from __future__ import annotations
 
@@ -19,7 +14,7 @@ from websocket import WebSocketApp
 
 @dataclass
 class GroveLcdStub:
-    """Placeholder Grove LCD RGB Backlight integration points."""
+    # Placeholder Grove LCD RGB Backlight integration points
 
     def set_text(self, text: str) -> None:
         print(f"[LCD] {text}")
