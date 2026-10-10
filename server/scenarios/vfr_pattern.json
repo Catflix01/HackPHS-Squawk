@@ -1,0 +1,59 @@
+{
+  "id": "vfr_pattern",
+  "title": "VFR closed traffic, one lap",
+  "airport": {
+    "name": "Squawk Regional Airport",
+    "icao": "KSQK",
+    "towerName": "Squawk Tower",
+    "towerFrequency": "118.5",
+    "atis": "Information Alpha",
+    "runway": "27",
+    "runwaySpoken": "two seven",
+    "patternDirection": "left",
+    "taxiRoute": "Alpha"
+  },
+  "aircraft": {
+    "type": "Cessna 172",
+    "callsign": "N123SQ",
+    "callsignSpoken": "Cessna one two three Sierra Quebec",
+    "callsignAbbreviated": "Cessna three Sierra Quebec"
+  },
+  "phases": {
+    "taxi": {
+      "description": "Pilot is parked at the main ramp and requests taxi for closed traffic.",
+      "expectedCall": "Squawk Tower, Cessna one two three Sierra Quebec, at the main ramp with information Alpha, request taxi for closed traffic.",
+      "expectedReadback": "Runway two seven, taxi via Alpha, hold short runway two seven, Cessna three Sierra Quebec.",
+      "atcReply": "Cessna one two three Sierra Quebec, Squawk Tower, runway two seven, taxi via Alpha, hold short runway two seven.",
+      "atcExpected": "Tower should give the runway, the taxi route, and an explicit hold short instruction.",
+      "keyElements": ["facility name", "full callsign", "position", "ATIS code", "request"],
+      "safetyCritical": ["Hold short instructions must be read back.", "Pilot must not taxi onto or across a runway without clearance."]
+    },
+    "takeoff": {
+      "description": "Pilot is holding short of runway 27 and is ready to depart, remaining in the pattern.",
+      "expectedCall": "Squawk Tower, Cessna three Sierra Quebec, holding short runway two seven, ready for departure, remaining in the pattern.",
+      "expectedReadback": "Runway two seven, cleared for takeoff, left closed traffic, Cessna three Sierra Quebec.",
+      "atcReply": "Cessna three Sierra Quebec, runway two seven, cleared for takeoff, make left closed traffic.",
+      "atcExpected": "Tower should state the runway, 'cleared for takeoff', and the pattern direction.",
+      "keyElements": ["callsign", "runway", "holding short", "ready for departure", "intentions"],
+      "safetyCritical": ["Takeoff clearance must be read back with the runway.", "Wrong runway in a call or readback is a safety issue.", "Pilot must not take off without a clearance."]
+    },
+    "pattern": {
+      "description": "Pilot is midfield left downwind runway 27 and wants a full-stop landing.",
+      "expectedCall": "Squawk Tower, Cessna three Sierra Quebec, midfield left downwind runway two seven, full stop.",
+      "expectedReadback": "Report left base, Cessna three Sierra Quebec.",
+      "atcReply": "Cessna three Sierra Quebec, number one, report left base runway two seven.",
+      "atcExpected": "Tower should give a sequence number and a reporting point.",
+      "keyElements": ["callsign", "position in pattern", "runway", "intentions"],
+      "safetyCritical": ["Wrong pattern direction or wrong runway is a safety issue."]
+    },
+    "landing": {
+      "description": "Pilot is on left base runway 27 and reports in for landing.",
+      "expectedCall": "Squawk Tower, Cessna three Sierra Quebec, left base runway two seven, full stop.",
+      "expectedReadback": "Cleared to land runway two seven, Cessna three Sierra Quebec.",
+      "atcReply": "Cessna three Sierra Quebec, runway two seven, cleared to land.",
+      "atcExpected": "Tower should state the runway and 'cleared to land'.",
+      "keyElements": ["callsign", "position", "runway", "intentions"],
+      "safetyCritical": ["Landing clearance must be read back with the runway.", "Pilot must not land without a clearance."]
+    }
+  }
+}
