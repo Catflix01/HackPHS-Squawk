@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from google import genai
@@ -16,6 +17,9 @@ from .timeouts import call_with_timeout
 CALLSIGN_PATTERNS = ("n123sq", "123sq", "sierra quebec", "three sierra quebec")
 RUNWAY_PATTERNS = ("two seven", "27", "two-seven")
 DEFAULT_MODELS = "gemini-3.5-flash-lite,gemini-3.8-flash"
+# A readback comes right after the instruction. Older tower traffic (e.g. from before a
+# page reload in the same session) must not make a fresh request count as a readback.
+READBACK_WINDOW_SECONDS = 60
 
 SYSTEM_PROMPT = """You are two people at once for a student pilot radio-practice app:
 1. A strict but fair FAA-style radio phraseology GRADER.
@@ -55,26 +59,44 @@ def _mentions(text: str, patterns: tuple[str, ...]) -> bool:
     return any(pattern in lowered for pattern in patterns)
 
 
-def is_readback(phase: str, role: str, history: list[dict[str, Any]]) -> bool:
-    """A pilot call right after a tower transmission in the same phase is a readback."""
+def is_readback(phase: str, role: str, history: list[dict[str, Any]],
+                transcript: str | None = None) -> bool:
+    """Is this pilot call a readback of the tower's last instruction?
+
+    Only if the tower spoke last, in the same phase, within READBACK_WINDOW_SECONDS, and the
+    transcript is known and does not address the facility ("Squawk Tower, ..."): readbacks
+    never start that way, new requests always do.
+    """
     if role != "pilot" or not history:
         return False
     last = history[-1]
-    return last.get("speaker") in ("atc", "ai_atc") and last.get("phase") == phase
+    if last.get("speaker") not in ("atc", "ai_atc") or last.get("phase") != phase:
+        return False
+    created = last.get("createdAt")
+    if isinstance(created, datetime):
+        age = (datetime.now(timezone.utc) - created).total_seconds()
+        if age > READBACK_WINDOW_SECONDS:
+            return False
+    if not transcript or "tower" in transcript.lower():
+        # Unknown transcript (STT failed): answer rather than risk a silent tower.
+        return False
+    return True
 
 
-def expected_call(phase: str, role: str, history: list[dict[str, Any]]) -> str:
+def expected_call(phase: str, role: str, history: list[dict[str, Any]],
+                  transcript: str | None = None) -> str:
     info = phase_info(phase)
     if role == "atc":
         return info["atcReply"]
-    return info["expectedReadback"] if is_readback(phase, role, history) else info["expectedCall"]
+    readback = is_readback(phase, role, history, transcript)
+    return info["expectedReadback"] if readback else info["expectedCall"]
 
 
 def fallback_grade(transcript: str | None, phase: str, role: str, want_reply: bool,
                    history: list[dict[str, Any]]) -> dict[str, Any]:
     """Canned reply plus a rough keyword-based placeholder score."""
     info = phase_info(phase)
-    readback = is_readback(phase, role, history)
+    readback = is_readback(phase, role, history, transcript)
     issues: list[str] = []
 
     if transcript is None:
@@ -90,7 +112,7 @@ def fallback_grade(transcript: str | None, phase: str, role: str, want_reply: bo
     return {
         "score": score,
         "issues": issues,
-        "expectedCall": expected_call(phase, role, history),
+        "expectedCall": expected_call(phase, role, history, transcript),
         "cfiAlert": None,
         "atcReply": info["atcReply"] if want_reply and not readback else None,
     }
@@ -118,7 +140,10 @@ def _call_gemini(transcript: str, phase: str, role: str, want_reply: bool,
         "transcript": transcript,
         "gradeAgainst": grade_against,
         "wantReply": want_reply,
-        "recentRadioTraffic": history,
+        "recentRadioTraffic": [
+            {"speaker": tx.get("speaker"), "phase": tx.get("phase"), "transcript": tx.get("transcript")}
+            for tx in history
+        ],
     })
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,

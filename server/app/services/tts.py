@@ -5,12 +5,16 @@ from __future__ import annotations
 import requests
 
 from ..config import AI_TIMEOUT_SECONDS, env
-from .timeouts import call_with_timeout
+from .timeouts import call_with_timeout, logger
 
 
 def _synthesize(text: str, voice_id: str) -> bytes | None:
     api_key = env("ELEVENLABS_API_KEY")
-    if not api_key or not voice_id or not text:
+    if not api_key or not voice_id:
+        logger.warning("TTS skipped: %s is not set, reply will be text-only",
+                       "ELEVENLABS_API_KEY" if not api_key else "ELEVENLABS_ATC_VOICE_ID")
+        return None
+    if not text:
         return None
 
     response = requests.post(
@@ -27,8 +31,12 @@ def _synthesize(text: str, voice_id: str) -> bytes | None:
         },
         timeout=AI_TIMEOUT_SECONDS,
     )
-    response.raise_for_status()
-    return response.content or None
+    if not response.ok:
+        # Surface ElevenLabs' reason (quota_exceeded, missing_permissions, voice_not_found, ...)
+        raise RuntimeError(f"ElevenLabs TTS HTTP {response.status_code}: {response.text[:300]}")
+    if not response.content:
+        raise RuntimeError("ElevenLabs TTS returned no audio")
+    return response.content
 
 
 def synthesize_speech(text: str, voice: str = "atc") -> bytes | None:

@@ -33,6 +33,15 @@ from .store import store
 
 logger = logging.getLogger("squawk.server")
 
+# Make squawk.* warnings (TTS/STT/Gemini failures, fallbacks) stand out in the uvicorn output.
+_squawk_logger = logging.getLogger("squawk")
+if not _squawk_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)-9s [%(name)s] %(message)s"))
+    _squawk_logger.addHandler(_handler)
+    _squawk_logger.setLevel(logging.INFO)
+    _squawk_logger.propagate = False
+
 TRANSCRIPT_UNAVAILABLE = "(transcription unavailable)"
 
 
@@ -117,6 +126,9 @@ def _follow_up(session_id: str, phase: str, pilot_tx_id: str, grade: dict[str, A
     reply = grade.get("atcReply")
     if reply:
         audio = None if demo else synthesize_speech(reply, voice="atc")
+        if audio is None:
+            logger.warning("Tower reply in %s sent WITHOUT audio (%s)", session_id,
+                           "DEMO_MODE is on" if demo else "TTS failed, see the TTS warning above")
         doc = _save_transmission(session_id, "ai_atc", phase, reply, "", None, [])
         anyio.from_thread.run(
             hub.broadcast, session_id, _transmission_message(doc, _b64(audio), "audio/mpeg")
@@ -164,10 +176,7 @@ def transmit(
     mode = hub.mode(sessionId)
     want_reply = mode == "ai" and role == "pilot"
 
-    history = [
-        {"speaker": tx["speaker"], "phase": tx["phase"], "transcript": tx["transcript"]}
-        for tx in store.recent(sessionId)
-    ]
+    history = store.recent(sessionId)
     if config.demo_mode():
         transcript: str | None = expected_call(phase, role, history)
     else:
@@ -248,6 +257,9 @@ async def session_socket(ws: WebSocket, session_id: str, role: str = "pilot") ->
                 await hub.handle(session_id, ws, role, message)
     except WebSocketDisconnect:
         pass
+    except RuntimeError as exc:
+        # Client closed during the handshake (React dev double-mount, fast reloads): harmless.
+        logger.debug("WebSocket in %s (%s) closed early: %s", session_id, role, exc)
     except Exception as exc:
         logger.warning("WebSocket error in %s (%s): %s", session_id, role, exc)
     finally:
