@@ -1,166 +1,255 @@
-"""Squawk FastAPI backend for radio loop simulation."""
+"""Squawk FastAPI backend. See docs/api-contract.md for the wire format."""
 
 from __future__ import annotations
 
 import base64
+import json
 import logging
-import os
-from collections import defaultdict
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, Set
+from typing import Any
 
 import anyio
-from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from pymongo import MongoClient
 
-from . import config  # noqa: F401  (loads server/.env before anything reads env)
-from .services.llm import generate_atc_reply
+from . import config
+from .scenario import normalize_phase, phase_info
+from .services.llm import grade_transmission
 from .services.stt import transcribe_audio
 from .services.tts import synthesize_speech
+from .sessions import ROLES, hub
+from .store import store
 
 logger = logging.getLogger("squawk.server")
 
-
-def _split_origins() -> list[str]:
-    origins = os.getenv("CORS_ORIGINS", "http://localhost:3000")
-    return [origin.strip() for origin in origins.split(",") if origin.strip()]
-
-
-REQUIRED_ENV_VARS = [
-    "GEMINI_API_KEY",
-    "ELEVENLABS_API_KEY",
-    "ELEVENLABS_ATC_VOICE_ID",
-    "MONGODB_URI",
-]
-
-
-class SessionHub:
-    """In-memory fan-out for session-scoped websocket messages."""
-
-    def __init__(self) -> None:
-        self._connections: Dict[str, Set[WebSocket]] = defaultdict(set)
-
-    async def connect(self, session_id: str, ws: WebSocket) -> None:
-        await ws.accept()
-        self._connections[session_id].add(ws)
-
-    def disconnect(self, session_id: str, ws: WebSocket) -> None:
-        peers = self._connections.get(session_id)
-        if not peers:
-            return
-        peers.discard(ws)
-        if not peers:
-            self._connections.pop(session_id, None)
-
-    async def broadcast(self, session_id: str, payload: dict[str, Any]) -> None:
-        for peer in list(self._connections.get(session_id, set())):
-            try:
-                await peer.send_json(payload)
-            except Exception:
-                self.disconnect(session_id, peer)
-
-
-hub = SessionHub()
-mongo_client: MongoClient | None = None
+TRANSCRIPT_UNAVAILABLE = "(transcription unavailable)"
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global mongo_client
-    uri = os.getenv("MONGODB_URI")
+    uri = config.env("MONGODB_URI")
     if uri:
-        try:
-            mongo_client = MongoClient(uri, serverSelectionTimeoutMS=1500)
-        except Exception as exc:
-            logger.warning("Mongo unavailable: %s", exc)
+        store.connect_mongo(uri, config.env("MONGODB_DB", "squawk"))
+    else:
+        logger.warning("MONGODB_URI not set: transmissions are kept in memory only")
+    if config.demo_mode():
+        logger.warning("DEMO_MODE is on: using canned transcripts, replies and scores")
     yield
-    if mongo_client is not None:
-        mongo_client.close()
+    store.close()
 
 
 app = FastAPI(title="Squawk API", lifespan=lifespan)
 
+_origins = config.cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_split_origins(),
-    allow_credentials=True,
+    allow_origins=_origins,
+    allow_credentials="*" not in _origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-def _get_transmission_collection():
-    if mongo_client is None:
-        return None
-    return mongo_client[os.getenv("MONGODB_DB", "squawk")]["transmissions"]
+def _b64(data: bytes | None) -> str | None:
+    return base64.b64encode(data).decode("ascii") if data else None
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _transmission_message(doc: dict[str, Any], audio_b64: str | None, mime_type: str) -> dict[str, Any]:
+    return {
+        "type": "transmission",
+        "id": doc["id"],
+        "speaker": doc["speaker"],
+        "phase": doc["phase"],
+        "transcript": doc["transcript"],
+        "expectedCall": doc["expectedCall"],
+        "score": doc["score"],
+        "issues": doc["issues"],
+        "audioBase64": audio_b64,
+        "mimeType": mime_type,
+    }
+
+
+def _save_transmission(session_id: str, speaker: str, phase: str, transcript: str,
+                       expected_call: str, score: int | None, issues: list[str]) -> dict[str, Any]:
+    doc = {
+        "id": uuid.uuid4().hex,
+        "sessionId": session_id,
+        "speaker": speaker,
+        "phase": phase,
+        "transcript": transcript,
+        "expectedCall": expected_call,
+        "score": score,
+        "issues": issues,
+        "createdAt": _now(),
+    }
+    store.add_transmission(doc)
+    return doc
 
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    missing = [key for key in REQUIRED_ENV_VARS if not os.getenv(key)]
     return {
         "status": "ok",
-        "missingEnv": missing,
+        "missingEnv": config.missing_env(),
+        "demoMode": config.demo_mode(),
     }
 
 
+def _follow_up(session_id: str, phase: str, pilot_tx_id: str, grade: dict[str, Any]) -> None:
+    """Runs after /transmit has responded: AI tower reply, then CFI alert."""
+    demo = config.demo_mode()
+
+    reply = grade.get("atcReply")
+    if reply:
+        audio = None if demo else synthesize_speech(reply, voice="atc")
+        doc = _save_transmission(session_id, "ai_atc", phase, reply, "", None, [])
+        anyio.from_thread.run(
+            hub.broadcast, session_id, _transmission_message(doc, _b64(audio), "audio/mpeg")
+        )
+
+    alert = grade.get("cfiAlert")
+    if alert:
+        audio = None if demo else synthesize_speech(alert, voice="cfi")
+        store.add_cfi_alert({
+            "id": uuid.uuid4().hex,
+            "sessionId": session_id,
+            "transmissionId": pilot_tx_id,
+            "phase": phase,
+            "text": alert,
+            "createdAt": _now(),
+        })
+        anyio.from_thread.run(
+            hub.send_to_roles,
+            session_id,
+            ["pilot"],
+            {"type": "cfi.alert", "text": alert, "audioBase64": _b64(audio), "mimeType": "audio/mpeg"},
+        )
+
+
+# Plain `def` on purpose: FastAPI runs it in a worker thread, so the blocking
+# STT/Gemini/TTS calls never stall the event loop that serves the WebSockets.
 @app.post("/transmit")
 def transmit(
+    background: BackgroundTasks,
     audio: UploadFile = File(...),
     sessionId: str = Form(...),
-    phase: str = Form(...),
+    role: str = Form("pilot"),
+    phase: str = Form("taxi"),
 ) -> dict[str, Any]:
+    role = role.strip().lower()
+    if role not in ("pilot", "atc"):
+        raise HTTPException(status_code=422, detail="role must be 'pilot' or 'atc'")
+
+    phase = normalize_phase(phase)
     audio_bytes = audio.file.read()
-    transcript = transcribe_audio(audio_bytes, audio.content_type or "audio/webm")
+    mime_type = (audio.content_type or "").split(";")[0].strip().lower()
+    if not mime_type.startswith("audio/"):
+        mime_type = "audio/webm"  # MediaRecorder blobs sometimes arrive as video/webm or octet-stream
 
-    llm_result = generate_atc_reply(transcript, phase.lower())
-    atc_reply = llm_result["atcReply"]
-    score = llm_result["score"]
-    issues = llm_result["issues"]
+    mode = hub.mode(sessionId)
+    want_reply = mode == "ai" and role == "pilot"
 
-    atc_audio = synthesize_speech(atc_reply)
-    atc_audio_b64 = base64.b64encode(atc_audio).decode("utf-8") if atc_audio else ""
+    if config.demo_mode():
+        info = phase_info(phase)
+        transcript: str | None = info["atcReply"] if role == "atc" else info["expectedCall"]
+    else:
+        transcript = transcribe_audio(audio_bytes, mime_type)
 
-    doc = {
-        "sessionId": sessionId,
-        "phase": phase,
-        "transcript": transcript,
-        "atcReply": atc_reply,
-        "score": score,
-        "issues": issues,
-        "createdAt": datetime.now(timezone.utc),
-    }
-    collection = _get_transmission_collection()
-    if collection is not None:
-        try:
-            collection.insert_one(doc)
-        except Exception as exc:
-            logger.warning("Failed to save transmission: %s", exc)
+    history = [
+        {"speaker": tx["speaker"], "phase": tx["phase"], "transcript": tx["transcript"]}
+        for tx in store.recent(sessionId)
+    ]
+    grade = grade_transmission(transcript, phase, role, want_reply=want_reply, history=history)
 
-    anyio.from_thread.run(hub.broadcast, sessionId, {"type": "atc.talking", "state": "started"})
+    doc = _save_transmission(
+        sessionId, role, phase, transcript or TRANSCRIPT_UNAVAILABLE,
+        grade["expectedCall"], grade["score"], grade["issues"],
+    )
+    # Human mode: relay the original audio so the other side hears the real voice.
+    audio_b64 = _b64(audio_bytes) if mode == "human" else None
+    anyio.from_thread.run(hub.broadcast, sessionId, _transmission_message(doc, audio_b64, mime_type))
 
+    if grade.get("atcReply") or grade.get("cfiAlert"):
+        background.add_task(_follow_up, sessionId, phase, doc["id"], grade)
+
+    return {"ok": True, "transmissionId": doc["id"]}
+
+
+@app.get("/debrief/{session_id}")
+def debrief(session_id: str) -> dict[str, Any]:
+    transmissions, alerts = store.session_history(session_id)
+
+    def iso(value: Any) -> str:
+        return value.isoformat() if isinstance(value, datetime) else str(value)
+
+    pilot_scores = [
+        tx["score"] for tx in transmissions
+        if tx.get("speaker") == "pilot" and isinstance(tx.get("score"), (int, float))
+    ]
     return {
-        "transcript": transcript,
-        "atcReply": atc_reply,
-        "expectedCall": llm_result.get("expectedCall", ""),
-        "score": score,
-        "issues": issues,
-        "audioBase64": atc_audio_b64,
+        "sessionId": session_id,
+        "averageScore": round(sum(pilot_scores) / len(pilot_scores)) if pilot_scores else 0,
+        "transmissions": [
+            {
+                "id": tx["id"],
+                "speaker": tx["speaker"],
+                "phase": tx["phase"],
+                "transcript": tx["transcript"],
+                "expectedCall": tx["expectedCall"],
+                "score": tx["score"],
+                "issues": tx["issues"],
+                "createdAt": iso(tx["createdAt"]),
+            }
+            for tx in transmissions
+        ],
+        "cfiAlerts": [
+            {
+                "id": alert["id"],
+                "transmissionId": alert["transmissionId"],
+                "phase": alert["phase"],
+                "text": alert["text"],
+                "createdAt": iso(alert["createdAt"]),
+            }
+            for alert in alerts
+        ],
     }
 
 
 @app.websocket("/ws/session/{session_id}")
-async def session_socket(ws: WebSocket, session_id: str) -> None:
-    await hub.connect(session_id, ws)
+async def session_socket(ws: WebSocket, session_id: str, role: str = "pilot") -> None:
+    role = role.strip().lower()
+    if role not in ROLES:
+        await ws.close(code=1008, reason="role must be pilot, atc or device")
+        return
+
+    await hub.connect(session_id, ws, role)
     try:
         while True:
-            message = await ws.receive_json()
-            event_type = message.get("type")
-            if event_type in {"ptt.down", "ptt.up", "atc.talking"}:
-                await hub.broadcast(session_id, message)
+            raw = await ws.receive_text()
+            try:
+                message = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(message, dict):
+                await hub.handle(session_id, ws, role, message)
     except WebSocketDisconnect:
-        hub.disconnect(session_id, ws)
-    except Exception:
-        hub.disconnect(session_id, ws)
+        pass
+    except Exception as exc:
+        logger.warning("WebSocket error in %s (%s): %s", session_id, role, exc)
+    finally:
+        await hub.disconnect(session_id, ws)
