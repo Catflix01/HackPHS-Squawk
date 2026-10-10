@@ -6,13 +6,16 @@ import base64
 import logging
 import os
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Set
 
+import anyio
 from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 
+from . import config  # noqa: F401  (loads server/.env before anything reads env)
 from .services.llm import generate_atc_reply
 from .services.stt import transcribe_audio
 from .services.tts import synthesize_speech
@@ -60,7 +63,24 @@ class SessionHub:
 
 
 hub = SessionHub()
-app = FastAPI(title="Squawk API")
+mongo_client: MongoClient | None = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    global mongo_client
+    uri = os.getenv("MONGODB_URI")
+    if uri:
+        try:
+            mongo_client = MongoClient(uri, serverSelectionTimeoutMS=1500)
+        except Exception as exc:
+            logger.warning("Mongo unavailable: %s", exc)
+    yield
+    if mongo_client is not None:
+        mongo_client.close()
+
+
+app = FastAPI(title="Squawk API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -72,18 +92,9 @@ app.add_middleware(
 
 
 def _get_transmission_collection():
-    uri = os.getenv("MONGODB_URI")
-    if not uri:
+    if mongo_client is None:
         return None
-
-    try:
-        client = MongoClient(uri, serverSelectionTimeoutMS=1500)
-        db_name = os.getenv("MONGODB_DB", "squawk")
-        db = client[db_name]
-        return db["transmissions"]
-    except Exception as exc:
-        logger.warning("Mongo unavailable: %s", exc)
-        return None
+    return mongo_client[os.getenv("MONGODB_DB", "squawk")]["transmissions"]
 
 
 @app.get("/health")
@@ -96,12 +107,12 @@ def health() -> dict[str, Any]:
 
 
 @app.post("/transmit")
-async def transmit(
+def transmit(
     audio: UploadFile = File(...),
     sessionId: str = Form(...),
     phase: str = Form(...),
 ) -> dict[str, Any]:
-    audio_bytes = await audio.read()
+    audio_bytes = audio.file.read()
     transcript = transcribe_audio(audio_bytes, audio.content_type or "audio/webm")
 
     llm_result = generate_atc_reply(transcript, phase.lower())
@@ -128,7 +139,7 @@ async def transmit(
         except Exception as exc:
             logger.warning("Failed to save transmission: %s", exc)
 
-    await hub.broadcast(sessionId, {"type": "atc.talking", "state": "started"})
+    anyio.from_thread.run(hub.broadcast, sessionId, {"type": "atc.talking", "state": "started"})
 
     return {
         "transcript": transcript,

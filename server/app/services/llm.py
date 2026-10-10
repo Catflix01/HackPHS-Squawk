@@ -8,6 +8,7 @@ import re
 from typing import Any, Dict, List
 
 from google import genai
+from google.genai import types
 
 
 def _fallback_result(transcript: str, phase: str) -> Dict[str, Any]:
@@ -79,9 +80,11 @@ def generate_atc_reply(transcript: str, phase: str) -> Dict[str, Any]:
     try:
         response = client.models.generate_content(
             model=model,
-            contents=[
-                {"role": "user", "parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}
-            ],
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                response_mime_type="application/json",
+            ),
         )
         text = response.text or ""
         parsed = _extract_json(text)
