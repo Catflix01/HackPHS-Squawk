@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { B612, B612_Mono, Big_Shoulders_Stencil } from "next/font/google";
+import { CloudBackground } from "./components/CloudBackground";
+import { Footer } from "./components/Footer";
+import { TopBar } from "./components/TopBar";
 import "./globals.css";
 
 // "Big Shoulders Stencil Display" is now the opsz axis of Big Shoulders Stencil (set to 72 in globals.css).
@@ -22,7 +25,12 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable} h-full antialiased`} suppressHydrationWarning>
-      <body className="flex min-h-screen flex-col overflow-x-hidden font-sans" suppressHydrationWarning>{children}</body>
+      <body className="flex min-h-screen flex-col overflow-x-hidden font-sans" suppressHydrationWarning>
+        <CloudBackground />
+        <TopBar />
+        <div className="relative z-10 flex flex-1 flex-col">{children}</div>
+        <Footer />
+      </body>
     </html>
   );
 }
