@@ -67,6 +67,21 @@ Server pipeline: transcribe → grade with Gemini against the expected call → 
 - `transmissions` are in chronological order. For `ai_atc` entries, `score` is `null`, `issues` is `[]`
   and `expectedCall` is `""`.
 
+### `POST /tts` (JSON)
+
+```json
+{"text": "Read back the runway and callsign.", "voice": "cfi"}
+```
+
+`voice` is `"cfi"` (`ELEVENLABS_CFI_VOICE_ID`, falling back to the tower voice) or `"atc"`; it defaults to `"cfi"`.
+`text` is 1–600 characters.
+
+- **200** `audio/mpeg`: the MP3 bytes. Results are cached in memory by (voice, text), so repeated
+  lines return instantly and don't use ElevenLabs credits.
+- **204** (no body): TTS is unavailable (no key or voice, an ElevenLabs error, longer than 5 s, or
+  DEMO_MODE). Failures aren't cached. Clients should fall back to `window.speechSynthesis`.
+- **422**: empty text or an unknown voice.
+
 ### `GET /lessons`
 
 ```json

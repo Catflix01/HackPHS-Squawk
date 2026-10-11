@@ -5,10 +5,12 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import threading
 import uuid
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 import anyio
 from fastapi import (
@@ -286,6 +288,37 @@ def create_plan(request: PlannerRequest) -> dict[str, Any]:
         "createdAt": _now(),
     })
     return {"planId": plan_id, "planItems": items}
+
+
+TTS_CACHE_SIZE = 200
+_tts_cache: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+_tts_cache_lock = threading.Lock()
+
+
+class TtsRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+    voice: Literal["cfi", "atc"] = "cfi"
+
+
+# Plain `def`: synthesize_speech blocks (bounded by the 5 s AI timeout) in a worker thread.
+@app.post("/tts")
+def tts(request: TtsRequest) -> Response:
+    key = (request.voice, request.text.strip())
+    with _tts_cache_lock:
+        audio = _tts_cache.get(key)
+        if audio is not None:
+            _tts_cache.move_to_end(key)
+    if audio is None:
+        if config.demo_mode():
+            return Response(status_code=204)  # DEMO_MODE: no AI calls; client falls back
+        audio = synthesize_speech(key[1], voice=request.voice)
+        if not audio:
+            return Response(status_code=204)  # TTS unavailable/failed/slow (logged); not cached
+        with _tts_cache_lock:
+            _tts_cache[key] = audio
+            while len(_tts_cache) > TTS_CACHE_SIZE:
+                _tts_cache.popitem(last=False)
+    return Response(content=audio, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/planner/{plan_id}.ics")

@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Wilco } from "../../components/Wilco";
+import { serverBaseUrl } from "../../lib/api";
 
 type Mood = "happy" | "grumpy" | "headset" | "salute";
 type Quiz = { question: string; choices: string[]; answer: number; explanation: string };
@@ -31,6 +32,9 @@ const steps: Step[] = [
   { title: "Land and taxi clear", cfiText: "After landing, keep the runway clear before switching. Nice work on the cross-country.", x: 94, y: 51, highlight: "Clear runway 27 · taxi clear", radio: { question: "What is the safe after-landing call?", choices: ["Pine Valley Tower, Cessna one two three Sierra Quebec, clear of runway 27.", "Cessna 123SQ, landed.", "Squawk Ground, cleared for takeoff runway 27."], answer: 0, explanation: "Tell tower when you are clear of the runway, then wait for taxi instructions." } },
 ];
 
+// 10 ms of silence: played on the "Start lesson" click to unlock audio playback.
+const SILENT_WAV = "data:audio/wav;base64,UklGRsQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
 const routePoints = steps.map(({ x, y }) => `${x},${y}`).join(" ");
 
 export default function CrossCountryPage() {
@@ -40,21 +44,76 @@ export default function CrossCountryPage() {
   const [quizChoice, setQuizChoice] = useState<number | null>(null);
   const [xp, setXp] = useState(0);
   const [finished, setFinished] = useState(false);
+  const [started, setStarted] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
   const step = steps[current];
   const progress = Math.round((current / (steps.length - 1)) * 100);
   const isCorrect = quizChoice === step.radio?.answer;
 
-  const speak = (text: string) => {
-    if (muted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
+  // Stop whatever the CFI is saying: in-flight /tts request, ElevenLabs clip, or browser speech.
+  const stopVoice = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    audioRef.current?.pause();
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+  }, []);
+
+  const speakWithBrowser = useCallback((text: string) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 0.96;
     window.speechSynthesis.speak(utterance);
-  };
+  }, []);
 
+  // ElevenLabs CFI voice via POST /tts; falls back to speechSynthesis on error or 204.
+  const speak = useCallback(async (text: string) => {
+    stopVoice();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const response = await fetch(`${serverBaseUrl}/tts`, {
+        body: JSON.stringify({ text, voice: "cfi" }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        signal: controller.signal,
+      });
+      if (response.status !== 200) throw new Error(`TTS unavailable (${response.status})`);
+      const blob = await response.blob();
+      if (controller.signal.aborted) return;
+      const url = URL.createObjectURL(blob);
+      objectUrlRef.current = url;
+      const audio = audioRef.current ?? new Audio();
+      audioRef.current = audio;
+      audio.setAttribute("src", url); // reuse the element unlocked by "Start lesson"
+      await audio.play();
+    } catch (error) {
+      if (controller.signal.aborted) return; // moved to another step or muted
+      console.warn("[cfi] ElevenLabs voice unavailable, using browser speech", error);
+      speakWithBrowser(text);
+    }
+  }, [speakWithBrowser, stopVoice]);
+
+  // Speak each step once the lesson has started; stop the clip when the step changes or on mute.
   useEffect(() => {
-    speak(step.cfiText);
-  }, [current, muted]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!started || muted) return;
+    void speak(step.cfiText);
+    return stopVoice;
+  }, [muted, speak, started, step.cfiText, stopVoice]);
+
+  function startLesson() {
+    // Runs inside the click, so the browser allows audio for the rest of the lesson.
+    const audio = new Audio(SILENT_WAV);
+    audioRef.current = audio;
+    void audio.play().catch(() => undefined);
+    if ("speechSynthesis" in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+    setStarted(true);
+  }
 
   const frequencies = useMemo(() => [
     ["KSQK ATIS", "127.65"], ["Ground", "121.9"], ["Tower", "118.5"], ["Departure", "124.35"], ["KPVL ATIS", "128.25"], ["KPVL Tower", "119.1"],
@@ -83,6 +142,6 @@ export default function CrossCountryPage() {
       <aside className="space-y-3 rounded-2xl border border-amber-300/30 bg-slate-900 p-4"><div className="flex items-start gap-3"><Wilco mood={finished ? "salute" : mood} size={72} /><div className="rounded-xl rounded-tl-none bg-sky-950 p-3 text-sm text-sky-100"><strong>AI CFI:</strong> {finished ? "You completed the cross-country. Wilco!" : step.cfiText}</div></div><div className="rounded-xl border border-sky-400/20 bg-slate-950 p-3"><p className="font-mono text-xs uppercase text-sky-300">Kneeboard · N123SQ</p><div className="mt-2 space-y-1 text-xs">{frequencies.map(([name, frequency]) => <div className="flex justify-between font-mono" key={name}><span className="text-slate-400">{name}</span><span className="text-amber-200">{frequency}</span></div>)}</div></div><div className="rounded-xl border border-sky-400/20 bg-slate-950 p-3"><p className="font-mono text-xs uppercase text-sky-300">Checkpoints</p><p className="mt-2 text-xs text-slate-300">Lake Carnegie · 090° · 4,500 ft · 12 min</p><p className="mt-1 text-xs text-slate-300">Route 1 tower · 100° · 4,500 ft · 9 min</p><p className="mt-1 text-xs text-slate-300">SQK VOR · 100° · 4,500 ft · 6 min</p></div><div className="rounded-xl border border-amber-300/40 bg-amber-300/10 p-3"><p className="font-mono text-xs uppercase text-amber-200">Current step {current + 1} / {steps.length}</p><p className="mt-1 font-bold text-amber-50">{step.title}</p><p className="mt-1 text-sm text-amber-100">{step.highlight}</p>{step.detail && <p className="mt-1 font-mono text-xs text-slate-300">{step.detail}</p>}</div></aside>
     </div>
     {step.radio && !finished && <section className="rounded-2xl border border-sky-400/30 bg-slate-900 p-4"><p className="font-bold text-sky-100">{step.radio.question}</p><div className="mt-3 grid gap-2">{step.radio.choices.map((choice, index) => <button className={`rounded-lg border p-3 text-left text-sm ${quizChoice === index ? index === step.radio?.answer ? "border-green-300 bg-green-300/15 text-green-100" : "border-red-300 bg-red-300/10 text-red-100" : "border-slate-700 bg-slate-800 text-slate-200"}`} key={choice} onClick={() => choose(index)} type="button">{choice}</button>)}</div>{quizChoice !== null && <p className={`mt-3 text-sm ${isCorrect ? "text-green-300" : "text-amber-200"}`}>{isCorrect ? "Correct — +10 XP. Wilco!" : step.radio.explanation}</p>}</section>}
-    {finished ? <section className="rounded-2xl border border-green-300/40 bg-green-300/10 p-6 text-center"><Wilco mood="salute" size={110} /><h2 className="text-3xl font-black text-green-100">Cross-country complete!</h2><p className="mt-2 font-mono text-amber-200">Total XP: {xp}</p><Link className="mt-5 inline-block rounded-xl bg-amber-300 px-6 py-3 font-bold text-slate-950" href="/fly">Fly it for real →</Link></section> : <button className="w-full rounded-xl bg-sky-400 px-5 py-4 font-bold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40" disabled={Boolean(step.radio && quizChoice !== step.radio.answer)} onClick={nextStep} type="button">{current === steps.length - 1 ? "Finish flight" : "Next step →"}</button>}
+    {finished ? <section className="rounded-2xl border border-green-300/40 bg-green-300/10 p-6 text-center"><Wilco mood="salute" size={110} /><h2 className="text-3xl font-black text-green-100">Cross-country complete!</h2><p className="mt-2 font-mono text-amber-200">Total XP: {xp}</p><Link className="mt-5 inline-block rounded-xl bg-amber-300 px-6 py-3 font-bold text-slate-950" href="/fly">Fly it for real →</Link></section> : !started ? <button className="w-full rounded-xl bg-amber-300 px-5 py-4 text-lg font-black text-slate-950 shadow-lg shadow-amber-300/20" onClick={startLesson} type="button">▶ Start lesson</button> : <button className="w-full rounded-xl bg-sky-400 px-5 py-4 font-bold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40" disabled={Boolean(step.radio && quizChoice !== step.radio.answer)} onClick={nextStep} type="button">{current === steps.length - 1 ? "Finish flight" : "Next step →"}</button>}
   </div></main>;
 }
