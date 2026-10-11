@@ -1,12 +1,40 @@
-type WilcoMood = "happy" | "grumpy" | "headset" | "salute";
+// Wilco, Squawk's original parrot mascot. Static artwork strings only (safe for innerHTML).
+export type WilcoMood = "happy" | "grumpy" | "headset" | "salute";
 
-export function Wilco({ mood = "happy", size = 96 }: { mood?: WilcoMood; size?: number }) {
-  const face = mood === "grumpy"
-    ? <><path d="M43 56l25 10M117 56L92 66M50 105c18-15 42-15 60 0" /><circle cx="59" cy="76" r="5" fill="#082f49" /><circle cx="101" cy="76" r="5" fill="#082f49" /></>
-    : mood === "salute"
-      ? <path d="M48 105c20 12 44 12 64 0M55 72h15M90 72h15M111 54l19-14M108 55h22" />
-      : mood === "headset"
-        ? <path d="M42 82a38 38 0 0176 0v23M42 82v20h18V82M118 82v20h-18" />
-        : <><path d="M45 66h18M97 66h18M48 96c18 22 46 22 64 0" /><path d="M49 48c8-12 18-16 27-15M111 48c-8-12-18-16-27-15" /></>;
-  return <svg aria-label={`Wilco ${mood}`} height={size} role="img" viewBox="0 0 160 160" width={size}><circle cx="80" cy="80" fill="#38bdf8" r="68" stroke="#fbbf24" strokeWidth="6" /><g fill="none" stroke="#082f49" strokeLinecap="round" strokeWidth="8">{face}</g></svg>;
+const CLOUD = "<g fill=\"#FFFFFF\"><circle cx=\"54\" cy=\"138\" r=\"55\"/><circle cx=\"100\" cy=\"100\" r=\"69\"/><circle cx=\"148\" cy=\"132\" r=\"59\"/><circle cx=\"30\" cy=\"170\" r=\"39\"/><circle cx=\"172\" cy=\"168\" r=\"41\"/><rect x=\"11\" y=\"143\" width=\"182\" height=\"64\" rx=\"32\"/></g><g fill=\"#CDEBFF\"><circle cx=\"54\" cy=\"138\" r=\"48\"/><circle cx=\"100\" cy=\"100\" r=\"62\"/><circle cx=\"148\" cy=\"132\" r=\"52\"/><circle cx=\"30\" cy=\"170\" r=\"32\"/><circle cx=\"172\" cy=\"168\" r=\"34\"/><rect x=\"18\" y=\"150\" width=\"168\" height=\"50\" rx=\"25\"/></g><g fill=\"#FFFFFF\" opacity=\"0.55\"><ellipse cx=\"78\" cy=\"70\" rx=\"16\" ry=\"8\"/><ellipse cx=\"150\" cy=\"108\" rx=\"10\" ry=\"5\"/></g>";
+
+const ART: Record<WilcoMood, string> = {
+  "happy": "<path d=\"M86 168 L74 198 L94 180 L100 200 L106 180 L126 198 L114 168 Z\" fill=\"#1E88E5\"/><path d=\"M94 170 L100 196 L106 170 Z\" fill=\"#FFC93C\"/><g fill=\"#3B2F2F\"><ellipse cx=\"84\" cy=\"178\" rx=\"10\" ry=\"5\"/><ellipse cx=\"116\" cy=\"178\" rx=\"10\" ry=\"5\"/></g><ellipse cx=\"100\" cy=\"128\" rx=\"56\" ry=\"52\" fill=\"#E63946\"/><ellipse cx=\"100\" cy=\"142\" rx=\"34\" ry=\"32\" fill=\"#FFC93C\"/><path d=\"M92 34 Q86 10 100 4 Q98 22 104 34 Z\" fill=\"#FFC93C\"/><path d=\"M100 34 Q106 8 122 8 Q110 22 110 38 Z\" fill=\"#1E88E5\"/><path d=\"M84 40 Q70 22 80 12 Q84 28 94 38 Z\" fill=\"#B5202E\"/><circle cx=\"100\" cy=\"76\" r=\"48\" fill=\"#E63946\"/><path d=\"M46 106 Q24 140 44 172 Q70 160 70 118 Z\" fill=\"#1E88E5\"/><path d=\"M48 118 Q40 138 48 156 Q60 146 62 124 Z\" fill=\"#FFC93C\"/><path d=\"M154 106 Q176 140 156 172 Q130 160 130 118 Z\" fill=\"#1E88E5\"/><path d=\"M152 118 Q160 138 152 156 Q140 146 138 124 Z\" fill=\"#FFC93C\"/><g fill=\"#FFF6E5\"><ellipse cx=\"80\" cy=\"72\" rx=\"20\" ry=\"22\"/><ellipse cx=\"120\" cy=\"72\" rx=\"20\" ry=\"22\"/></g><g fill=\"#1B1B3A\"><circle cx=\"82\" cy=\"74\" r=\"10\"/><circle cx=\"118\" cy=\"74\" r=\"10\"/></g><g fill=\"#fff\"><circle cx=\"85\" cy=\"70\" r=\"3.5\"/><circle cx=\"121\" cy=\"70\" r=\"3.5\"/></g><g fill=\"#FF8FA3\" opacity=\"0.7\"><ellipse cx=\"66\" cy=\"94\" rx=\"7\" ry=\"4\"/><ellipse cx=\"134\" cy=\"94\" rx=\"7\" ry=\"4\"/></g><path d=\"M90 100 Q100 122 110 100 Z\" fill=\"#C2185B\"/><path d=\"M84 90 Q100 78 116 90 Q118 104 104 110 Q106 98 84 90 Z\" fill=\"#FFF1C9\"/><path d=\"M90 104 Q100 124 110 104 Q104 118 100 118 Q96 118 90 104 Z\" fill=\"#3B2F2F\"/>",
+  "grumpy": "<path d=\"M86 168 L74 198 L94 180 L100 200 L106 180 L126 198 L114 168 Z\" fill=\"#1E88E5\"/><path d=\"M94 170 L100 196 L106 170 Z\" fill=\"#FFC93C\"/><g fill=\"#3B2F2F\"><ellipse cx=\"84\" cy=\"178\" rx=\"10\" ry=\"5\"/><ellipse cx=\"116\" cy=\"178\" rx=\"10\" ry=\"5\"/></g><ellipse cx=\"100\" cy=\"128\" rx=\"56\" ry=\"52\" fill=\"#E63946\"/><ellipse cx=\"100\" cy=\"142\" rx=\"34\" ry=\"32\" fill=\"#FFC93C\"/><path d=\"M92 34 Q86 10 100 4 Q98 22 104 34 Z\" fill=\"#FFC93C\"/><path d=\"M100 34 Q106 8 122 8 Q110 22 110 38 Z\" fill=\"#1E88E5\"/><path d=\"M84 40 Q70 22 80 12 Q84 28 94 38 Z\" fill=\"#B5202E\"/><circle cx=\"100\" cy=\"76\" r=\"48\" fill=\"#E63946\"/><path d=\"M46 106 Q24 140 44 172 Q70 160 70 118 Z\" fill=\"#1E88E5\"/><path d=\"M48 118 Q40 138 48 156 Q60 146 62 124 Z\" fill=\"#FFC93C\"/><path d=\"M154 106 Q176 140 156 172 Q130 160 130 118 Z\" fill=\"#1E88E5\"/><path d=\"M152 118 Q160 138 152 156 Q140 146 138 124 Z\" fill=\"#FFC93C\"/><g fill=\"#FFF6E5\"><ellipse cx=\"80\" cy=\"72\" rx=\"20\" ry=\"22\"/><ellipse cx=\"120\" cy=\"72\" rx=\"20\" ry=\"22\"/></g><g fill=\"#1B1B3A\"><circle cx=\"82\" cy=\"76\" r=\"9\"/><circle cx=\"118\" cy=\"76\" r=\"9\"/></g><g fill=\"#FFF6E5\"><rect x=\"68\" y=\"58\" width=\"28\" height=\"16\"/><rect x=\"104\" y=\"58\" width=\"28\" height=\"16\"/></g><g stroke=\"#1B1B3A\" stroke-width=\"5\" stroke-linecap=\"round\"><path d=\"M66 62 L94 70\"/><path d=\"M134 62 L106 70\"/></g><g fill=\"#FF8FA3\" opacity=\"0.7\"><ellipse cx=\"66\" cy=\"94\" rx=\"7\" ry=\"4\"/><ellipse cx=\"134\" cy=\"94\" rx=\"7\" ry=\"4\"/></g><path d=\"M84 90 Q100 78 116 90 Q118 108 102 116 Q106 100 84 90 Z\" fill=\"#FFF1C9\"/><path d=\"M90 100 Q100 106 106 100 Q104 112 98 112 Q92 110 90 100 Z\" fill=\"#3B2F2F\"/>",
+  "headset": "<path d=\"M86 168 L74 198 L94 180 L100 200 L106 180 L126 198 L114 168 Z\" fill=\"#1E88E5\"/><path d=\"M94 170 L100 196 L106 170 Z\" fill=\"#FFC93C\"/><g fill=\"#3B2F2F\"><ellipse cx=\"84\" cy=\"178\" rx=\"10\" ry=\"5\"/><ellipse cx=\"116\" cy=\"178\" rx=\"10\" ry=\"5\"/></g><ellipse cx=\"100\" cy=\"128\" rx=\"56\" ry=\"52\" fill=\"#E63946\"/><ellipse cx=\"100\" cy=\"142\" rx=\"34\" ry=\"32\" fill=\"#FFC93C\"/><path d=\"M92 34 Q86 10 100 4 Q98 22 104 34 Z\" fill=\"#FFC93C\"/><path d=\"M100 34 Q106 8 122 8 Q110 22 110 38 Z\" fill=\"#1E88E5\"/><path d=\"M84 40 Q70 22 80 12 Q84 28 94 38 Z\" fill=\"#B5202E\"/><circle cx=\"100\" cy=\"76\" r=\"48\" fill=\"#E63946\"/><path d=\"M46 106 Q24 140 44 172 Q70 160 70 118 Z\" fill=\"#1E88E5\"/><path d=\"M48 118 Q40 138 48 156 Q60 146 62 124 Z\" fill=\"#FFC93C\"/><path d=\"M154 106 Q176 140 156 172 Q130 160 130 118 Z\" fill=\"#1E88E5\"/><path d=\"M152 118 Q160 138 152 156 Q140 146 138 124 Z\" fill=\"#FFC93C\"/><g fill=\"#FFF6E5\"><ellipse cx=\"80\" cy=\"72\" rx=\"20\" ry=\"22\"/><ellipse cx=\"120\" cy=\"72\" rx=\"20\" ry=\"22\"/></g><g fill=\"#1B1B3A\"><circle cx=\"82\" cy=\"74\" r=\"10\"/><circle cx=\"118\" cy=\"74\" r=\"10\"/></g><g fill=\"#fff\"><circle cx=\"85\" cy=\"70\" r=\"3.5\"/><circle cx=\"121\" cy=\"70\" r=\"3.5\"/></g><g fill=\"#FF8FA3\" opacity=\"0.7\"><ellipse cx=\"66\" cy=\"94\" rx=\"7\" ry=\"4\"/><ellipse cx=\"134\" cy=\"94\" rx=\"7\" ry=\"4\"/></g><path d=\"M84 90 Q100 78 116 90 Q118 108 102 116 Q106 100 84 90 Z\" fill=\"#FFF1C9\"/><path d=\"M90 100 Q100 106 106 100 Q104 112 98 112 Q92 110 90 100 Z\" fill=\"#3B2F2F\"/><path d=\"M54 76 Q56 26 100 26 Q144 26 146 76\" fill=\"none\" stroke=\"#CBD5E1\" stroke-width=\"7\" stroke-linecap=\"round\"/><g fill=\"#334155\" stroke=\"#CBD5E1\" stroke-width=\"3\"><rect x=\"42\" y=\"64\" width=\"20\" height=\"30\" rx=\"9\"/><rect x=\"138\" y=\"64\" width=\"20\" height=\"30\" rx=\"9\"/></g><path d=\"M54 92 Q58 116 84 112\" fill=\"none\" stroke=\"#CBD5E1\" stroke-width=\"4\" stroke-linecap=\"round\"/><circle cx=\"86\" cy=\"112\" r=\"5\" fill=\"#334155\" stroke=\"#CBD5E1\" stroke-width=\"2\"/><circle cx=\"152\" cy=\"70\" r=\"3\" fill=\"#F5B83D\"/>",
+  "salute": "<path d=\"M86 168 L74 198 L94 180 L100 200 L106 180 L126 198 L114 168 Z\" fill=\"#1E88E5\"/><path d=\"M94 170 L100 196 L106 170 Z\" fill=\"#FFC93C\"/><g fill=\"#3B2F2F\"><ellipse cx=\"84\" cy=\"178\" rx=\"10\" ry=\"5\"/><ellipse cx=\"116\" cy=\"178\" rx=\"10\" ry=\"5\"/></g><ellipse cx=\"100\" cy=\"128\" rx=\"56\" ry=\"52\" fill=\"#E63946\"/><ellipse cx=\"100\" cy=\"142\" rx=\"34\" ry=\"32\" fill=\"#FFC93C\"/><path d=\"M92 34 Q86 10 100 4 Q98 22 104 34 Z\" fill=\"#FFC93C\"/><path d=\"M100 34 Q106 8 122 8 Q110 22 110 38 Z\" fill=\"#1E88E5\"/><path d=\"M84 40 Q70 22 80 12 Q84 28 94 38 Z\" fill=\"#B5202E\"/><circle cx=\"100\" cy=\"76\" r=\"48\" fill=\"#E63946\"/><path d=\"M46 106 Q24 140 44 172 Q70 160 70 118 Z\" fill=\"#1E88E5\"/><path d=\"M48 118 Q40 138 48 156 Q60 146 62 124 Z\" fill=\"#FFC93C\"/><path d=\"M138 112 Q170 90 168 52 Q150 50 140 64 Q130 86 126 108 Z\" fill=\"#1E88E5\"/><path d=\"M162 58 Q150 58 144 70 Q148 76 156 70 Z\" fill=\"#FFC93C\"/><g fill=\"#FFF6E5\"><ellipse cx=\"80\" cy=\"72\" rx=\"20\" ry=\"22\"/><ellipse cx=\"120\" cy=\"72\" rx=\"20\" ry=\"22\"/></g><g fill=\"#1B1B3A\"><circle cx=\"82\" cy=\"74\" r=\"10\"/><circle cx=\"118\" cy=\"74\" r=\"10\"/></g><g fill=\"#fff\"><circle cx=\"85\" cy=\"70\" r=\"3.5\"/><circle cx=\"121\" cy=\"70\" r=\"3.5\"/></g><g fill=\"#FF8FA3\" opacity=\"0.7\"><ellipse cx=\"66\" cy=\"94\" rx=\"7\" ry=\"4\"/><ellipse cx=\"134\" cy=\"94\" rx=\"7\" ry=\"4\"/></g><path d=\"M90 100 Q100 122 110 100 Z\" fill=\"#C2185B\"/><path d=\"M84 90 Q100 78 116 90 Q118 104 104 110 Q106 98 84 90 Z\" fill=\"#FFF1C9\"/><path d=\"M90 104 Q100 124 110 104 Q104 118 100 118 Q96 118 90 104 Z\" fill=\"#3B2F2F\"/>"
+};
+
+export function Wilco({
+  mood = "happy",
+  size = 96,
+  cloud,
+  className = "",
+}: {
+  mood?: WilcoMood;
+  size?: number;
+  /** Die-cut cloud sticker behind Wilco. Default: on for every mood except "happy". */
+  cloud?: boolean;
+  className?: string;
+}) {
+  const showCloud = cloud ?? mood !== "happy";
+  return (
+    <svg
+      aria-label={`Wilco the parrot, ${mood}`}
+      className={className}
+      dangerouslySetInnerHTML={{ __html: (showCloud ? CLOUD : "") + ART[mood] }}
+      height={size}
+      role="img"
+      viewBox={showCloud ? "-20 -14 240 236" : "0 0 200 204"}
+      width={size}
+      xmlns="http://www.w3.org/2000/svg"
+    />
+  );
 }
+
+export default Wilco;
