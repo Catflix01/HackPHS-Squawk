@@ -60,6 +60,11 @@ async def lifespan(_app: FastAPI):
         logger.warning("MONGODB_URI not set: transmissions are kept in memory only")
     if config.demo_mode():
         logger.warning("DEMO_MODE is on: using canned transcripts, replies and scores")
+    if not config.env("ELEVENLABS_CFI_VOICE_ID"):
+        logger.warning(
+            "ELEVENLABS_CFI_VOICE_ID not set: the CFI will speak with the ATC voice "
+            "(ELEVENLABS_ATC_VOICE_ID). Set ELEVENLABS_CFI_VOICE_ID for a distinct instructor voice."
+        )
     yield
     store.close()
 
