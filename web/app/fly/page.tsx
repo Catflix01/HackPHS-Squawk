@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Gauges } from "./components/Gauges";
+import { RadioStack } from "./components/RadioStack";
 
 type Role = "pilot" | "atc";
 type FlightPhase = "taxi" | "takeoff" | "pattern" | "landing";
@@ -62,6 +64,7 @@ export default function FlyPage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [busyFlash, setBusyFlash] = useState(false);
   const [awaitingTower, setAwaitingTower] = useState(false);
+  const [receiving, setReceiving] = useState(false); // display only (RX light)
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -160,6 +163,7 @@ export default function FlyPage() {
           audio.pause();
           if (stopCurrentClipRef.current === finish) stopCurrentClipRef.current = null;
           receivingRef.current = false;
+          setReceiving(false);
           send({ type: "rx", state: "stopped" });
           setNoiseGain(phaseRef.current);
           resolve();
@@ -179,6 +183,7 @@ export default function FlyPage() {
           }, (audio.duration + 3) * 1000);
         };
         receivingRef.current = true;
+        setReceiving(true);
         setNoiseGain(phaseRef.current, true);
         send({ type: "rx", state: "started" });
         audio.play().catch((error: unknown) => {
@@ -454,80 +459,98 @@ export default function FlyPage() {
   }, [flightStarted, pressPtt, releasePtt]);
 
   const pttDisabled = !flightStarted || Boolean(freqHolder && freqHolder !== role);
-  const roleLabel = role === "pilot" ? "PILOT · N123SQ" : "TOWER · TWR 118.5";
+  const roleLabel = role === "pilot" ? "PILOT" : "TOWER";
 
   return (
-    <main className="min-h-screen bg-slate-950 p-3 text-slate-100 sm:p-6">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-        <header className="flex items-center justify-between rounded-2xl border border-sky-400/30 bg-slate-900 p-4 shadow-xl">
-          <div>
-            <p className="font-mono text-lg font-bold tracking-wide text-sky-200">{roleLabel}</p>
-            <p className="font-mono text-sm text-slate-400">SESSION {sessionId} · {mode === "ai" ? "AI TOWER" : "LIVE TOWER"}</p>
-          </div>
-          <div className="text-right text-xs">
-            <p className={connected ? "text-green-300" : "text-amber-300"}>{connected ? "● CONNECTED" : "○ RECONNECTING"}</p>
-            <p className="text-slate-400">{peers.length} peer{peers.length === 1 ? "" : "s"}</p>
-          </div>
-        </header>
+    <main className="min-h-screen bg-[#050a16] p-3 font-mono text-[#ffb000] sm:p-6">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
+        <RadioStack
+          active={{ label: "TWR", freq: "118.5" }}
+          standby={{ label: "GND", freq: "121.9" }}
+          callsign="N123SQ"
+          roleLabel={roleLabel}
+          light={recording ? "tx" : receiving ? "rx" : "idle"}
+          connected={connected}
+          modeLabel={mode === "ai" ? "AI TOWER" : "LIVE TOWER"}
+          sessionId={sessionId}
+          peers={peers.length}
+        />
 
         {warnings.length > 0 && (
-          <section className="rounded-xl border border-amber-400/50 bg-amber-500/10 p-3 text-sm text-amber-200">
+          <section className="rounded-lg border border-[#ffb000]/40 bg-[#ffb000]/10 p-3 text-xs text-[#ffcf66]">
             {warnings.map((warning) => <p key={warning}>⚠ {warning}</p>)}
           </section>
         )}
 
         {!flightStarted && (
-          <section className="rounded-2xl border border-sky-400/40 bg-sky-950/50 p-5 text-center">
-            <p className="mb-3 text-slate-300">Connect your headset and start the flight deck before transmitting.</p>
-            <button type="button" onClick={() => void startFlight()} className="rounded-xl bg-amber-300 px-6 py-3 font-bold text-slate-950 shadow-lg shadow-amber-300/20">
-              Start flight
+          <section className="rounded-xl border border-[#1c2a45] bg-[#0b1426] p-5 text-center">
+            <p className="mb-3 text-sm text-slate-400">Connect your headset and start the flight deck before transmitting.</p>
+            <button type="button" onClick={() => void startFlight()} className="rounded-lg bg-[#ffb000] px-6 py-3 font-bold tracking-widest text-[#050a16] shadow-[0_0_18px_rgba(255,176,0,0.35)]">
+              START FLIGHT
             </button>
           </section>
         )}
 
-        {busyFlash && <div className="rounded-xl border border-red-400/50 bg-red-500/15 p-3 text-center font-mono font-bold text-red-200">FREQ BUSY</div>}
-        {freqHolder && <div className="rounded-xl border border-amber-400/50 bg-amber-500/10 p-3 text-center font-mono text-amber-200">FREQ BUSY · {freqHolder.toUpperCase()} transmitting</div>}
+        {busyFlash && <div className="rounded-lg border border-red-500/60 bg-red-500/15 p-2 text-center font-bold tracking-widest text-red-300">FREQ BUSY</div>}
+        {freqHolder && <div className="rounded-lg border border-[#ffb000]/50 bg-[#ffb000]/10 p-2 text-center text-sm tracking-wider">FREQ BUSY · {freqHolder.toUpperCase()} TRANSMITTING</div>}
         {role === "pilot" && cfiAlerts.map((alert, index) => (
-          <div key={`${alert}-${index}`} className="rounded-xl border border-amber-300/60 bg-amber-400/15 p-3 text-amber-100"><strong>CFI:</strong> {alert}</div>
+          <div key={`${alert}-${index}`} className="rounded-lg border border-[#ffb000]/60 bg-[#ffb000]/10 p-3 font-sans text-sm text-[#ffe2a3]"><strong className="font-mono text-[#ffb000]">CFI:</strong> {alert}</div>
         ))}
 
-        <section className="grid grid-cols-4 gap-2">
-          {PHASES.map((item) => (
-            <button key={item} type="button" onClick={() => { setPhase(item); send({ type: "phase.set", phase: item }); }} className={`rounded-lg border px-2 py-3 text-sm font-semibold capitalize ${phase === item ? "border-amber-300 bg-amber-300/20 text-amber-100" : "border-sky-500/30 bg-slate-900 text-sky-200"}`}>{item}</button>
-          ))}
+        <Gauges phase={phase} />
+
+        <section className="grid grid-cols-4 gap-1 rounded-xl border border-[#1c2a45] bg-[#0b1426] p-1" aria-label="Flight phase">
+          {PHASES.map((item, index) => {
+            const current = PHASES.indexOf(phase);
+            const style = item === phase
+              ? "bg-[#39ff88]/15 text-[#39ff88] border-[#39ff88]/60"
+              : index < current
+                ? "text-[#39ff88]/50 border-transparent"
+                : "text-slate-500 border-transparent";
+            return (
+              <button key={item} type="button" onClick={() => { setPhase(item); send({ type: "phase.set", phase: item }); }} className={`rounded-lg border px-2 py-2.5 text-xs font-bold uppercase tracking-widest sm:text-sm ${style}`}>
+                {index < current ? "✓ " : ""}{item}
+              </button>
+            );
+          })}
         </section>
 
-        <section className="flex flex-col items-center gap-3 rounded-2xl border border-sky-400/30 bg-slate-900 p-5">
-          <button
-            type="button"
-            disabled={pttDisabled}
-            onPointerDown={(event) => { event.preventDefault(); pressPtt(); }}
-            onPointerUp={(event) => { event.preventDefault(); releasePtt(); }}
-            onPointerCancel={releasePtt}
-            className={`h-44 w-44 rounded-full border-4 text-lg font-bold uppercase shadow-2xl transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${recording ? "border-red-400 bg-red-500/30 text-red-100" : "border-sky-400 bg-sky-500/20 text-sky-100"}`}
-          >
-            {recording ? "Transmitting" : "Hold to talk · Space"}
-          </button>
-          {awaitingTower && <p className="animate-pulse text-sm text-sky-300">Tower is responding...</p>}
-        </section>
+        <div className="grid gap-3 md:grid-cols-[auto_1fr]">
+          <section className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[#1c2a45] bg-[#0b1426] p-4">
+            <button
+              type="button"
+              disabled={pttDisabled}
+              onPointerDown={(event) => { event.preventDefault(); pressPtt(); }}
+              onPointerUp={(event) => { event.preventDefault(); releasePtt(); }}
+              onPointerCancel={releasePtt}
+              className={`h-40 w-40 rounded-full border-4 text-base font-bold uppercase tracking-wider transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${recording ? "border-red-500 bg-red-500/25 text-red-200 shadow-[0_0_30px_rgba(239,68,68,0.5)]" : "border-[#ffb000] bg-[#ffb000]/10 text-[#ffb000] shadow-[0_0_20px_rgba(255,176,0,0.2)]"}`}
+            >
+              {recording ? "Transmitting" : "Hold to talk · Space"}
+            </button>
+            {awaitingTower && <p className="animate-pulse text-xs tracking-widest text-[#39ff88]">TOWER RESPONDING…</p>}
+          </section>
 
-        <section className="rounded-2xl border border-sky-400/30 bg-slate-900 p-4">
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-widest text-sky-200">Radio log</h2>
-          <div className="max-h-80 space-y-2 overflow-y-auto">
-            {entries.length === 0 && <p className="text-sm text-slate-400">Your transmissions and tower replies will appear here.</p>}
-            {entries.map((entry) => (
-              <article key={entry.id} className="rounded-lg bg-slate-800/80 p-3 text-sm">
-                <p><span className="font-mono font-bold text-sky-300">{entry.speaker === "ai_atc" ? "ATC" : entry.speaker.toUpperCase()}</span> <span className="text-slate-400">· {entry.phase}</span></p>
-                <p className="mt-1 text-slate-100">{entry.transcript}</p>
-                {typeof entry.score === "number" && <p className={`mt-1 font-mono text-xs ${entry.score >= 80 ? "text-green-300" : "text-amber-300"}`}>Score {entry.score}</p>}
-                {entry.issues.length > 0 && <ul className="mt-1 list-disc pl-5 text-xs text-amber-200">{entry.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
-              </article>
-            ))}
-          </div>
-        </section>
+          <section className="rounded-xl border border-[#1c2a45] bg-[#0b1426] p-3">
+            <h2 className="mb-2 text-xs font-bold uppercase tracking-[0.3em] text-[#39ff88]">Transcript</h2>
+            <div className="max-h-72 space-y-2 overflow-y-auto">
+              {entries.length === 0 && <p className="text-xs text-slate-500">Your transmissions and tower replies will appear here.</p>}
+              {entries.map((entry) => (
+                <article key={entry.id} className="rounded-md border border-[#1c2a45] bg-black/40 p-2.5 text-sm">
+                  <p className="text-xs">
+                    <span className={`font-bold ${entry.speaker === role ? "text-[#ffb000]" : "text-[#39ff88]"}`}>{entry.speaker === "ai_atc" ? "TWR" : entry.speaker.toUpperCase()}</span>{" "}
+                    <span className="text-slate-500">· {entry.phase.toUpperCase()}</span>
+                    {typeof entry.score === "number" && <span className={`float-right ${entry.score >= 80 ? "text-[#39ff88]" : "text-[#ffb000]"}`}>SCORE {entry.score}</span>}
+                  </p>
+                  <p className="mt-1 font-sans text-slate-100">{entry.transcript}</p>
+                  {entry.issues.length > 0 && <ul className="mt-1 list-disc pl-5 font-sans text-xs text-[#ffcf66]">{entry.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
 
-        <Link href={`/debrief/${encodeURIComponent(sessionId)}`} className="rounded-xl border border-amber-300/50 bg-amber-300/10 px-4 py-3 text-center font-semibold text-amber-100">End flight · View debrief</Link>
-        <footer className="pb-3 text-center text-xs text-slate-500">Practice tool only. Not a substitute for flight instruction.</footer>
+        <Link href={`/debrief/${encodeURIComponent(sessionId)}`} className="rounded-lg border border-[#ffb000]/40 px-4 py-2.5 text-center text-sm font-bold tracking-widest hover:bg-[#ffb000]/10">END FLIGHT · DEBRIEF</Link>
+        <footer className="pb-3 text-center font-sans text-xs text-slate-600">Practice tool only. Not a substitute for flight instruction.</footer>
       </div>
     </main>
   );
