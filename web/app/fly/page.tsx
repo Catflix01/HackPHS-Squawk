@@ -420,25 +420,38 @@ export default function FlyPage() {
     setNoiseGain(phase, receivingRef.current);
   }, [phase, setNoiseGain]);
 
+  // Spacebar push-to-talk for both roles (laptop fallback for the Pi button). Key events only
+  // reach the focused window, so two windows on one Mac never both transmit.
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (role !== "atc" || event.code !== "Space" || event.repeat) return;
-      if ((event.target as HTMLElement).tagName === "BUTTON") return;
-      event.preventDefault();
-      pressPtt();
+    const isTyping = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || !flightStarted || isTyping(event.target)) return;
+      event.preventDefault(); // also stops a focused button (phase/PTT) from being "clicked"
+      if (!event.repeat) pressPtt();
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if (role !== "atc" || event.code !== "Space") return;
+      if (event.code !== "Space" || !flightStarted || isTyping(event.target)) return;
       event.preventDefault();
       releasePtt();
     };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keyup", onKeyUp);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("keyup", onKeyUp);
+    // Releasing Space in another window never sends keyup here: unkey when focus is lost.
+    const onBlur = () => releasePtt();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") releasePtt();
     };
-  }, [pressPtt, releasePtt, role]);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [flightStarted, pressPtt, releasePtt]);
 
   const pttDisabled = !flightStarted || Boolean(freqHolder && freqHolder !== role);
   const roleLabel = role === "pilot" ? "PILOT · N123SQ" : "TOWER · TWR 118.5";
@@ -493,7 +506,7 @@ export default function FlyPage() {
             onPointerCancel={releasePtt}
             className={`h-44 w-44 rounded-full border-4 text-lg font-bold uppercase shadow-2xl transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${recording ? "border-red-400 bg-red-500/30 text-red-100" : "border-sky-400 bg-sky-500/20 text-sky-100"}`}
           >
-            {recording ? "Transmitting" : role === "atc" ? "Hold · Space" : "Hold to talk"}
+            {recording ? "Transmitting" : "Hold to talk · Space"}
           </button>
           {awaitingTower && <p className="animate-pulse text-sm text-sky-300">Tower is responding...</p>}
         </section>

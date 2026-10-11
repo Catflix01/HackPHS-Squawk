@@ -1,7 +1,8 @@
 """Raspberry Pi push-to-talk client for Squawk.
 
-- GPIO17 button (to GND) -> {"type":"ptt.down"} / {"type":"ptt.up"} as role=device.
-- Grove LCD RGB Backlight on I2C bus 1: frequency + phase text, colour shows radio state
+- PTT button on PTT_GPIO (default 16, Grove D16: outputs HIGH when pressed)
+  -> {"type":"ptt.down"} / {"type":"ptt.up"} as role=device.
+- Grove LCD RGB Backlight on any I2C port (bus 1): frequency + phase text, colour shows radio state
   (red = transmitting, green = receiving, blue = idle).
 - Reconnects to the server forever; the button keeps working the LCD while offline.
 
@@ -18,7 +19,7 @@ from pathlib import Path
 
 from websocket import WebSocketApp
 
-BUTTON_PIN = 17
+DEFAULT_BUTTON_PIN = 16  # Grove Base HAT port D16
 LCD_TEXT_ADDR = 0x3E
 LCD_RGB_ADDR = 0x62
 
@@ -199,7 +200,13 @@ class PttClient:
         try:
             from gpiozero import Button
 
-            button = Button(BUTTON_PIN, pull_up=True, bounce_time=0.03)
+            # Read at attach time so pi/.env (loaded in main) is respected.
+            pin = int(os.getenv("PTT_GPIO", str(DEFAULT_BUTTON_PIN)))
+            # Grove button drives the pin HIGH when pressed -> pull-down (pull_up=False).
+            # A bare button wired to GND needs PTT_PULL_UP=true instead.
+            pull_up = os.getenv("PTT_PULL_UP", "false").strip().lower() in {"1", "true", "yes", "on"}
+            button = Button(pin, pull_up=pull_up, bounce_time=0.03)
+            print(f"PTT button on GPIO{pin} (pull_up={pull_up})")
             button.when_pressed = self.button_down
             button.when_released = self.button_up
             return button

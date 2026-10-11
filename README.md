@@ -105,19 +105,35 @@ Everything runs on the Mac except the pilot cockpit. Find the Mac's LAN IP
 
 ## 5. Raspberry Pi
 
-Hardware:
-- A momentary button between **GPIO17** (pin 11) and **GND** (pin 9). The internal pull-up is used.
-- A Grove LCD RGB Backlight on I2C bus 1: text at `0x3e`, RGB at `0x62`.
-  Enable I2C with `sudo raspi-config` → Interface Options → I2C.
+Hardware (Grove Base HAT):
+- **Grove button on port D16** (GPIO16). It drives the pin HIGH when pressed, so the client uses a
+  pull-down (`PTT_GPIO=16`, `PTT_PULL_UP=false`, the defaults). For a bare button wired between a GPIO
+  pin and GND, set `PTT_PULL_UP=true` and `PTT_GPIO` to that pin.
+- **Grove LCD RGB Backlight on any I2C port** of the HAT (all on bus 1): text at `0x3e`, RGB at `0x62`.
+  Enable I2C with `sudo raspi-config` → Interface Options → I2C, then check with `i2cdetect -y 1`.
 - A USB headset, set as the default input and output device.
+
+Setup. On a **Raspberry Pi 5**, gpiozero needs the system `lgpio` backend, so install it with apt and
+let the venv see system packages:
+
+```bash
+sudo apt install python3-gpiozero python3-lgpio
+cd pi
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+In `pi/.env`, set `PI_SERVER_WS_URL=ws://<server-LAN-IP>:8000` (for example `ws://192.168.1.20:8000`;
+not `localhost`, which would point at the Pi itself). The client adds `/ws/session/<PI_SESSION_ID>?role=device`
+itself. Also set `WEB_URL=http://<server-LAN-IP>:3000` for the kiosk. Then start the button + LCD client
+(it reconnects automatically):
 
 ```bash
 cd pi
-python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env            # PI_SERVER_WS_URL=ws://192.168.1.20:8000, WEB_URL=http://192.168.1.20:3000
-python ptt.py                   # button + LCD client (role=device), reconnects automatically
+python ptt.py
 ```
 
 In a second terminal, on the Pi desktop:
