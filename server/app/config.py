@@ -36,6 +36,15 @@ def missing_env() -> list[str]:
     return [key for key in REQUIRED_ENV_VARS if not env(key)]
 
 
+# The Next.js dev server picks the first free port from 3000, so allow the usual
+# three on both hostnames out of the box. Override with CORS_ORIGINS for LAN/kiosk use.
+DEFAULT_CORS_ORIGINS = ",".join(
+    f"http://{host}:{port}"
+    for host in ("localhost", "127.0.0.1")
+    for port in (3000, 3001, 3002)
+)
+
+
 def cors_origins() -> list[str]:
-    raw = env("CORS_ORIGINS", "http://localhost:3000")
+    raw = env("CORS_ORIGINS", DEFAULT_CORS_ORIGINS)
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
