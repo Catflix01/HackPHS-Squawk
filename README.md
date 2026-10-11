@@ -1,158 +1,145 @@
 # Squawk
 
-Squawk is a Duolingo-style ATC radio practice app for student pilots. The demo loop is:
+Radio practice for student pilots.
 
-1. Hold push-to-talk (spacebar in web, or GPIO button on Pi).
-2. Speak a radio call.
-3. Get AI ATC feedback and hear a realistic ATC voice response.
+- **AI mode:** you talk on the radio; Gemini plays the tower and ElevenLabs speaks its reply. Every call
+  is graded against the expected phraseology.
+- **Human mode:** a controller on a Mac (spacebar push-to-talk) and a pilot on a Raspberry Pi (kiosk
+  browser, USB headset, GPIO17 button) talk to each other through the server, half-duplex like a real
+  radio. AI grades every transmission in the background, and an AI flight instructor (CFI) speaks to
+  the pilot only when a mistake is safety-relevant.
 
-## Monorepo structure
+A session is in human mode while a controller (`role=atc`) is connected; otherwise it is in AI mode.
 
-- `/web` — Next.js (App Router + TypeScript + Tailwind) cockpit UI
-- `/server` — FastAPI backend (STT + LLM + TTS + MongoDB)
-- `/pi` — Raspberry Pi push-to-talk client stub
+```
+web/     Next.js cockpit UI (/fly, /debrief)
+server/  FastAPI: STT (ElevenLabs) -> grading + tower (Gemini) -> TTS (ElevenLabs), WebSocket sessions
+pi/      Raspberry Pi: GPIO PTT button + Grove LCD client, Chromium kiosk script
+docs/    api-contract.md, the REST + WebSocket contract shared by web, server and pi
+```
+
+The training scenario (airport, runway 27, tower 118.5, callsign N123SQ, expected calls per phase)
+lives in `server/scenarios/vfr_pattern.json`.
 
 ---
 
-## 1) Server (`/server`)
-
-### Features
-
-- `POST /transmit` accepts `audio` (webm), `sessionId`, and `phase`
-- Uses service wrappers in `app/services/`:
-  - `stt.py` (ElevenLabs speech-to-text)
-  - `llm.py` (Gemini Flash ATC reply + score + issues)
-  - `tts.py` (ElevenLabs text-to-speech)
-- Saves transmission docs to MongoDB collection `transmissions`
-- `GET /health` shows missing env vars for clear startup warnings
-- `WebSocket /ws/session/{sessionId}` relays `ptt.down`, `ptt.up`, and `atc.talking`
-
-### Run server locally
+## 1. Server
 
 ```bash
-cd /home/runner/work/HackPHS-Squawk/HackPHS-Squawk/server
-python -m venv .venv
+cd server
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload --port 8000
+pip install -r requirements-dev.txt     # runtime deps + pytest
+cp .env.example .env                    # then fill in keys (see below)
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Test server quickly
+`--host 0.0.0.0` makes the server reachable from the Pi on your LAN. Check it with:
 
 ```bash
 curl http://localhost:8000/health
+# {"status":"ok","missingEnv":[],"demoMode":false}
 ```
+
+Run the tests (offline; they force DEMO_MODE and skip MongoDB):
+
+```bash
+cd server
+pytest
+```
+
+### Server environment (`server/.env`)
+
+| var | required | purpose |
+|---|---|---|
+| `GEMINI_API_KEY` | yes* | grading + AI tower |
+| `ELEVENLABS_API_KEY` | yes* | speech-to-text + text-to-speech |
+| `ELEVENLABS_ATC_VOICE_ID` | yes* | tower voice |
+| `ELEVENLABS_CFI_VOICE_ID` | no | instructor voice (defaults to the tower voice) |
+| `DEMO_MODE` | no | `true` = no AI calls at all; canned transcripts, replies and scores |
+| `MONGODB_URI` | no | MongoDB Atlas URI. Empty = keep transmissions in memory |
+| `MONGODB_DB` | no | default `squawk` |
+| `CORS_ORIGINS` | no | comma-separated web origins, e.g. `http://localhost:3000,http://192.168.1.20:3000`, or `*` |
+| `GEMINI_MODEL` | no | comma-separated fallback chain, default `gemini-3.5-flash-lite,gemini-3.8-flash` |
+| `SCENARIO` | no | scenario file in `server/scenarios/`, default `vfr_pattern` |
+
+\* The demo never freezes: without these keys, in `DEMO_MODE`, or when any AI call fails or takes more
+than 5 s, the server falls back to canned replies and placeholder scores. `/health` lists any missing keys.
 
 ---
 
-## 2) Web (`/web`)
-
-### `/fly` cockpit page includes
-
-- Frequency panel (`TWR 118.5`) in monospace
-- Clickable phase strip: Taxi, Takeoff, Pattern, Landing
-- Hold-to-talk button using `MediaRecorder`
-- Spacebar push-to-talk support
-- WebSocket sync for Pi `ptt.down`/`ptt.up`
-- Radio log with pilot + ATC lines and score
-- ATC audio playback from base64 MP3
-- Web Audio API background loops (`engine.mp3`, `wind.mp3`)
-- Phase-based gain profile and ducking while ATC speaks
-- On-screen warnings for missing env/audio/server availability
-
-### Run web locally
+## 2. Web
 
 ```bash
-cd /home/runner/work/HackPHS-Squawk/HackPHS-Squawk/web
-cp .env.example .env.local
+cd web
+cp .env.example .env.local      # NEXT_PUBLIC_SERVER_URL=http://<server-ip>:8000
 npm install
-npm run dev
+npm run dev -- --hostname 0.0.0.0
 ```
 
-Open: `http://localhost:3000/fly`
-
-### Test web quickly
-
-- Hold the cockpit button and speak
-- Release to transmit and receive transcript + ATC reply
-- Press/hold spacebar to use keyboard push-to-talk
-- Confirm warnings appear if `engine.mp3` or `wind.mp3` are missing
+Open `http://localhost:3000/fly`.
 
 ---
 
-## 3) Raspberry Pi stub (`/pi`)
+## 3. Running AI mode (one computer)
 
-### Features
+1. Start the server and web app (sections 1 and 2).
+2. Open `http://localhost:3000/fly?role=pilot&session=DEMO`.
+3. Hold the talk button (or the spacebar), make your call, then release. The tower answers by voice, and
+   the radio log shows your score and issues.
+4. Open the debrief at `/debrief/DEMO`.
 
-- `ptt.py` uses `gpiozero.Button(17, pull_up=True)`
-- Sends `{"type":"ptt.down"}` on press
-- Sends `{"type":"ptt.up"}` on release
-- WebSocket URL is env-driven
-- Grove LCD RGB Backlight placeholders:
-  - red while transmitting
-  - green while ATC is talking
-  - blue when idle
+Use `DEMO_MODE=true` when you have no keys or no reliable internet.
 
-### Run Pi script
+## 4. Running human mode (Mac controller + Pi pilot)
+
+Everything runs on the Mac except the pilot cockpit. Find the Mac's LAN IP
+(`ipconfig getifaddr en0`); this README uses `192.168.1.20`.
+
+1. **Mac:** in `server/.env`, set `CORS_ORIGINS=http://localhost:3000,http://192.168.1.20:3000`.
+   In `web/.env.local`, set `NEXT_PUBLIC_SERVER_URL=http://192.168.1.20:8000`. Start the server and web app.
+2. **Mac (controller):** open `http://localhost:3000/fly?role=atc&session=DEMO`. Hold the spacebar to talk.
+3. **Pi (pilot):** start the button/LCD client and the kiosk (section 5). The kiosk opens
+   `/fly?role=pilot&session=DEMO`.
+4. Only one side can transmit at a time. If you key up while the other side is talking, you get "frequency busy".
+
+## 5. Raspberry Pi
+
+Hardware:
+- A momentary button between **GPIO17** (pin 11) and **GND** (pin 9). The internal pull-up is used.
+- A Grove LCD RGB Backlight on I2C bus 1: text at `0x3e`, RGB at `0x62`.
+  Enable I2C with `sudo raspi-config` → Interface Options → I2C.
+- A USB headset, set as the default input and output device.
 
 ```bash
-cd /home/runner/work/HackPHS-Squawk/HackPHS-Squawk/pi
-python -m venv .venv
+cd pi
+python3 -m venv .venv
 source .venv/bin/activate
-pip install gpiozero websocket-client
-cp .env.example .env
-export $(grep -v '^#' .env | xargs)
-python ptt.py
+pip install -r requirements.txt
+cp .env.example .env            # PI_SERVER_WS_URL=ws://192.168.1.20:8000, WEB_URL=http://192.168.1.20:3000
+python ptt.py                   # button + LCD client (role=device), reconnects automatically
 ```
 
-### Test Pi integration
+In a second terminal, on the Pi desktop:
 
-- Start server and web first
-- Run Pi script
-- Press GPIO17 button and confirm web recording starts/stops
+```bash
+cd pi
+./kiosk.sh
+```
 
----
+LCD line 1 shows `TWR 118.5`. Line 2 shows the phase and the status: **red/TX** while you transmit,
+**green/RX** while radio audio plays, **blue** when idle, `BUSY` while the controller transmits, and
+`OFFLINE` when there is no connection.
 
-## Environment variables
-
-See:
-
-- `/server/.env.example`
-- `/web/.env.example`
-- `/pi/.env.example`
-- root `/.env.example` (quick reference)
-
-Do **not** commit real keys.
+Pressing the Pi button sends `ptt.down`/`ptt.up` as `role=device`. The server treats the device as the
+pilot for the frequency lock and tells the pilot browser (`device.ptt`) to start or stop recording.
 
 ---
+
+## API
+
+See [docs/api-contract.md](docs/api-contract.md).
 
 ## Sponsor stack
 
-- Gemini
-- ElevenLabs
-- MongoDB Atlas
-- DigitalOcean
-- Tiger Data
-- Solana
-
----
-
-## SETUP CHECKLIST
-
-- `/.gitignore` — ignore `.env`, Python cache/venv, and Next/node build artifacts
-- `/.env.example` — root reference for all server/web/pi env vars with fake placeholder values
-- `/server/requirements.txt` — FastAPI + runtime dependencies
-- `/server/.env.example` — server env vars and comments
-- `/server/app/main.py` — API routes (`/health`, `/transmit`) and session WebSocket relay
-- `/server/app/services/stt.py` — ElevenLabs STT wrapper
-- `/server/app/services/llm.py` — Gemini Flash ATC JSON generation wrapper
-- `/server/app/services/tts.py` — ElevenLabs TTS wrapper
-- `/web/.env.example` — web env vars and comments
-- `/web/app/page.tsx` — simple landing page linking to `/fly`
-- `/web/app/fly/page.tsx` — cockpit UI, recording flow, WebSocket events, audio playback, warnings
-- `/web/app/layout.tsx` — app metadata/title
-- `/web/app/globals.css` — dark cockpit base theme
-- `/web/public/audio/README.md` — required audio assets and format guidance
-- `/pi/.env.example` — Pi WebSocket env var and comment
-- `/pi/ptt.py` — GPIO17 push-to-talk client + Grove LCD stubs
+Gemini · ElevenLabs · MongoDB Atlas · DigitalOcean · Tiger Data · Solana
