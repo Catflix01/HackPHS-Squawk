@@ -6,7 +6,8 @@ import { Wilco } from "../../components/Wilco";
 import { fetchFallback } from "../../lib/api";
 
 type Lesson = { id: string; title: string; brief: string; flashcards: Array<{ front: string; back: string }> };
-const fallback: Lesson = {
+const fallbackLessons: Record<string, Lesson> = {
+  unit1: {
   id: "unit1",
   title: "Radio basics",
   brief: "Learn the building blocks of a clear, confident aviation call.",
@@ -17,7 +18,54 @@ const fallback: Lesson = {
     { front: "Wilco", back: "Wilco means you understand and will comply." },
     { front: "Say again", back: "Use say again when you need a transmission repeated." },
   ],
+  },
+  taxi: {
+    id: "taxi",
+    title: "Taxi communications",
+    brief: "Practice requesting taxi with the current ATIS code. Read back the assigned route and hold short instruction before moving.",
+    flashcards: [
+      { front: "Request taxi", back: "Squawk Ground, Cessna one two three Sierra Quebec, at the ramp, Alpha, taxi for departure." },
+      { front: "Read back the route", back: "Taxi runway 27 via Alpha and Bravo, hold short runway 27, Cessna one two three Sierra Quebec." },
+      { front: "Ground frequency", back: "KSQK Ground is 121.9." },
+      { front: "Why read back hold short?", back: "A hold short instruction protects the runway and must be understood before you continue." },
+    ],
+  },
+  takeoff: {
+    id: "takeoff",
+    title: "Takeoff clearances",
+    brief: "Build a precise departure call and read back a takeoff clearance. Keep runway 27 and your callsign in every readback.",
+    flashcards: [
+      { front: "Ready for departure", back: "Squawk Tower, Cessna one two three Sierra Quebec, ready for departure, runway 27." },
+      { front: "Takeoff readback", back: "Cleared for takeoff runway 27, Cessna one two three Sierra Quebec." },
+      { front: "Tower frequency", back: "KSQK Tower is 118.5." },
+      { front: "Before taking the runway", back: "Confirm the clearance is for your callsign and runway 27 before you move." },
+    ],
+  },
+  pattern: {
+    id: "pattern",
+    title: "Pattern calls",
+    brief: "Use standard traffic pattern reports and listen for sequencing instructions. Stay concise while keeping your callsign and runway clear.",
+    flashcards: [
+      { front: "Left downwind report", back: "Squawk Tower, Cessna one two three Sierra Quebec, left downwind runway 27." },
+      { front: "Following traffic", back: "Number two, follow the Cessna, Cessna one two three Sierra Quebec." },
+      { front: "Pattern runway", back: "The active practice pattern is left traffic for runway 27." },
+      { front: "Keep listening", back: "Acknowledge sequencing instructions and maintain visual separation as directed." },
+    ],
+  },
+  landing: {
+    id: "landing",
+    title: "Landing and taxi clear",
+    brief: "Read back a landing clearance and announce when you have exited the runway. Then contact ground for taxi instructions.",
+    flashcards: [
+      { front: "Landing readback", back: "Cleared to land runway 27, Cessna one two three Sierra Quebec." },
+      { front: "Exit report", back: "Squawk Tower, Cessna one two three Sierra Quebec, clear of runway 27." },
+      { front: "Contact ground", back: "Squawk Ground, Cessna one two three Sierra Quebec, clear of runway 27, taxi to the ramp." },
+      { front: "Ground frequency", back: "KSQK Ground is 121.9 after you are clear of the runway." },
+    ],
+  },
 };
+
+const fallback = fallbackLessons.unit1;
 
 export default function LessonPage() {
   const [lesson, setLesson] = useState(fallback);
@@ -27,9 +75,11 @@ export default function LessonPage() {
 
   useEffect(() => {
     const id = window.location.pathname.split("/").pop() || "unit1";
+    const scriptedLesson = fallbackLessons[id] ?? fallback;
+    Promise.resolve(scriptedLesson).then(setLesson);
     void fetchFallback<{ lessons?: Array<{ id: string }> }>("/lessons", { lessons: [] }).then((list) => {
       if ((list.lessons ?? []).some((item) => item.id === id)) {
-        void fetchFallback<Lesson>(`/lessons/${encodeURIComponent(id)}`, fallback).then(setLesson);
+        void fetchFallback<Lesson>(`/lessons/${encodeURIComponent(id)}`, scriptedLesson).then(setLesson);
       }
     });
   }, []);
