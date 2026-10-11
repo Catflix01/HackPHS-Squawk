@@ -93,6 +93,30 @@ Server pipeline: transcribe → grade with Gemini against the expected call → 
   DEMO_MODE). Failures aren't cached. Clients should fall back to `window.speechSynthesis`.
 - **422**: empty text or an unknown voice.
 
+### `GET /atis?icao=KTTN`
+
+`icao` is optional and defaults to env `ATIS_ICAO`, else `KTTN`. Invalid input gives 422.
+
+```json
+{
+  "icao": "KTTN", "letter": "Alpha", "frequency": "127.65",
+  "metar": "METAR KTTN 111053Z 05008KT 10SM FEW070 OVC110 14/13 A3033 ...",
+  "source": "live",
+  "script": "Squawk Regional information Alpha, time one zero five three zulu. Wind zero five zero at eight. ... Advise on initial contact you have information Alpha.",
+  "audioBase64": "<mp3>", "mimeType": "audio/mpeg", "generatedAt": "2026-10-11T11:05:00+00:00"
+}
+```
+
+- **METAR:** fetched from `aviationweather.gov/api/data/metar` with a 5 s timeout. In DEMO_MODE or on
+  failure the server uses a canned METAR, and `source` is `"canned"`.
+- **Script:** Gemini writes it in standard ATIS order, with numbers spoken as words. If Gemini is
+  unavailable or returns something off-format, a fixed template produces the same structure.
+- **Audio:** ElevenLabs reads it with the tower voice, using the same cache as `/tts`. `audioBase64` is
+  `null` when TTS is unavailable or in DEMO_MODE; clients should fall back to `speechSynthesis`.
+- **Cache:** the whole response is cached per ICAO for 10 minutes. If it was built from the canned
+  METAR or has no audio, it's cached for only 1 minute.
+- The ATIS letter is always "Alpha", which matches the grading rule above.
+
 ### `GET /lessons`
 
 ```json

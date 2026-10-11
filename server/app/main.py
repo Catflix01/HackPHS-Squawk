@@ -5,7 +5,9 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import threading
+import time
 import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
@@ -31,6 +33,7 @@ from . import config
 from .lessons import lesson_summary, load_lessons
 from .planner import build_plan, plan_to_ics
 from .scenario import normalize_phase
+from .services import atis as atis_service
 from .services.llm import expected_call, grade_transmission
 from .services.stt import transcribe_audio
 from .services.tts import synthesize_speech
@@ -322,25 +325,71 @@ class TtsRequest(BaseModel):
     voice: Literal["cfi", "atc"] = "cfi"
 
 
-# Plain `def`: synthesize_speech blocks (bounded by the 5 s AI timeout) in a worker thread.
-@app.post("/tts")
-def tts(request: TtsRequest) -> Response:
-    key = (request.voice, request.text.strip())
+def _cached_tts(text: str, voice: str) -> bytes | None:
+    """MP3 for (voice, text) from the LRU cache, else ElevenLabs. None in DEMO_MODE or on failure."""
+    key = (voice, text.strip())
     with _tts_cache_lock:
         audio = _tts_cache.get(key)
         if audio is not None:
             _tts_cache.move_to_end(key)
+            return audio
+    if config.demo_mode():
+        return None  # DEMO_MODE: no AI calls; clients fall back to browser speech
+    audio = synthesize_speech(key[1], voice=voice)
+    if not audio:
+        return None  # TTS unavailable/failed/slow (logged); not cached
+    with _tts_cache_lock:
+        _tts_cache[key] = audio
+        while len(_tts_cache) > TTS_CACHE_SIZE:
+            _tts_cache.popitem(last=False)
+    return audio
+
+
+# Plain `def`: synthesize_speech blocks (bounded by the 5 s AI timeout) in a worker thread.
+@app.post("/tts")
+def tts(request: TtsRequest) -> Response:
+    audio = _cached_tts(request.text, request.voice)
     if audio is None:
-        if config.demo_mode():
-            return Response(status_code=204)  # DEMO_MODE: no AI calls; client falls back
-        audio = synthesize_speech(key[1], voice=request.voice)
-        if not audio:
-            return Response(status_code=204)  # TTS unavailable/failed/slow (logged); not cached
-        with _tts_cache_lock:
-            _tts_cache[key] = audio
-            while len(_tts_cache) > TTS_CACHE_SIZE:
-                _tts_cache.popitem(last=False)
+        return Response(status_code=204)
     return Response(content=audio, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+ATIS_TTL_SECONDS = 600  # a new METAR is issued about hourly; 10 min keeps it fresh and cheap
+ATIS_CANNED_TTL_SECONDS = 60  # retry the live METAR soon after a failure
+_atis_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_atis_cache_lock = threading.Lock()
+
+
+@app.get("/atis")
+def atis(icao: str | None = None) -> dict[str, Any]:
+    station = (icao or config.env("ATIS_ICAO", "KTTN")).strip().upper()
+    if not re.fullmatch(r"[A-Z0-9]{3,4}", station):
+        raise HTTPException(status_code=422, detail="icao must be 3-4 letters/digits, e.g. KTTN")
+
+    now = time.monotonic()
+    with _atis_cache_lock:
+        cached = _atis_cache.get(station)
+    if cached and now < cached[0]:
+        return cached[1]
+
+    metar, source = atis_service.get_metar(station)
+    script = atis_service.build_script(metar)
+    audio = _cached_tts(script, "atc")
+    result = {
+        "icao": station,
+        "letter": atis_service.ATIS_LETTER,
+        "frequency": "127.65",
+        "metar": metar.get("rawOb", ""),
+        "source": source,
+        "script": script,
+        "audioBase64": _b64(audio),
+        "mimeType": "audio/mpeg",
+        "generatedAt": _now().isoformat(),
+    }
+    ttl = ATIS_TTL_SECONDS if source == "live" and audio else ATIS_CANNED_TTL_SECONDS
+    with _atis_cache_lock:
+        _atis_cache[station] = (now + ttl, result)
+    return result
 
 
 @app.get("/planner/{plan_id}.ics")

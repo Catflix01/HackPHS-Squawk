@@ -172,7 +172,6 @@ def _extract_json(text: str) -> dict[str, Any]:
 def _call_gemini(transcript: str, phase: str, role: str, want_reply: bool,
                  history: list[dict[str, Any]], grade_against: str) -> dict[str, Any]:
     scenario = load_scenario()
-    client = genai.Client(api_key=env("GEMINI_API_KEY"))
     system_prompt = SYSTEM_PROMPT.format(
         scenario=json.dumps(scenario, indent=2),
         tower=scenario["airport"]["towerName"],
@@ -188,13 +187,21 @@ def _call_gemini(transcript: str, phase: str, role: str, want_reply: bool,
             for tx in history
         ],
     })
+    return generate_json(system_prompt, user_prompt)
+
+
+def generate_json(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict[str, Any]:
+    """One Gemini JSON call. Blocking and may raise: wrap it in call_with_timeout.
+
+    GEMINI_MODEL may be a comma-separated chain: busy (503) or retired (404) models are
+    skipped, all within the caller's single timeout budget.
+    """
+    client = genai.Client(api_key=env("GEMINI_API_KEY"))
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
         response_mime_type="application/json",
-        temperature=0.3,
+        temperature=temperature,
     )
-    # GEMINI_MODEL may be a comma-separated chain: busy (503) or retired (404)
-    # models are skipped, all within the caller's single timeout budget.
     models = [m.strip() for m in env("GEMINI_MODEL", DEFAULT_MODELS).split(",") if m.strip()]
     last_error: Exception | None = None
     for model in models:
