@@ -42,6 +42,12 @@ Grading rules:
   crossing a runway without a clearance, wrong pattern direction). Write one or two calm
   sentences, spoken by a flight instructor sitting next to the student. Otherwise null.
   Do NOT raise cfiAlert for style, brevity, or missing ATIS.
+- correctCall: the ideal call the speaker should have made in THIS exact situation, in standard
+  FAA phraseology using the scenario's facility, callsign and runway (based on "gradeAgainst",
+  adjusted to what the pilot was actually trying to do). One transmission, no quotes.
+- tip: ONE short sentence of coaching from a flight instructor about the most important fix
+  (or brief praise if the call was good). Max 120 characters.
+- Do not deduct or comment on a missing ATIS code; the app checks that separately.
 
 Tower rules (only when wantReply is true):
 - atcReply: what {tower} says next on frequency, short real-world FAA phraseology, using the
@@ -51,7 +57,43 @@ Tower rules (only when wantReply is true):
   atcReply is null.
 
 Respond with JSON only:
-{{"score": int, "issues": [string], "cfiAlert": string|null, "atcReply": string|null}}"""
+{{"score": int, "issues": [string], "correctCall": string, "tip": string, "cfiAlert": string|null, "atcReply": string|null}}"""
+
+
+ATIS_PATTERN = re.compile(r"\b(information|with)\s+alpha\b", re.IGNORECASE)
+ATIS_DEDUCTION = 5
+ATIS_TIP = "On initial contact, tell them you have the ATIS: \"...with information Alpha.\""
+
+
+def default_tip(issues: list[str]) -> str:
+    return f"Focus on this: {issues[0].rstrip('.')}." if issues else "Nice call: clear, complete, standard phraseology."
+
+
+def needs_atis(transcript: str | None, phase: str, role: str, history: list[dict[str, Any]]) -> bool:
+    """Initial pilot call to ground/tower before taxi that doesn't report the ATIS code."""
+    return (
+        role == "pilot"
+        and phase == "taxi"
+        and bool(transcript)
+        and not is_readback(phase, role, history, transcript)
+        and not ATIS_PATTERN.search(transcript or "")
+    )
+
+
+def apply_atis_rule(result: dict[str, Any], transcript: str | None, phase: str, role: str,
+                    history: list[dict[str, Any]]) -> dict[str, Any]:
+    """Minor deduction + CFI tip when the initial call omits "information Alpha"."""
+    if not needs_atis(transcript, phase, role, history):
+        return result
+    others = [issue for issue in result["issues"] if "atis" not in issue.lower()]  # no duplicates
+    issues = others + ["Missing ATIS: say \"with information Alpha\"."]
+    clean_otherwise = not others
+    return {
+        **result,
+        "score": max(0, result["score"] - ATIS_DEDUCTION),
+        "issues": issues[:5],
+        "tip": ATIS_TIP if clean_otherwise or not result.get("tip") else result["tip"],
+    }
 
 
 def _mentions(text: str, patterns: tuple[str, ...]) -> bool:
@@ -113,6 +155,7 @@ def fallback_grade(transcript: str | None, phase: str, role: str, want_reply: bo
         "score": score,
         "issues": issues,
         "expectedCall": expected_call(phase, role, history, transcript),
+        "tip": default_tip(issues),
         "cfiAlert": None,
         "atcReply": info["atcReply"] if want_reply and not readback else None,
     }
@@ -170,10 +213,14 @@ def _clean(raw: dict[str, Any], fallback: dict[str, Any], role: str, want_reply:
         score = fallback["score"]
     cfi = raw.get("cfiAlert")
     reply = str(raw.get("atcReply") or "").strip()
+    issues = [str(item) for item in raw.get("issues") or []][:4]
+    correct = str(raw.get("correctCall") or "").strip().strip('"')
+    tip = str(raw.get("tip") or "").strip()
     return {
         "score": score,
-        "issues": [str(item) for item in raw.get("issues") or []][:4],
-        "expectedCall": fallback["expectedCall"],
+        "issues": issues,
+        "expectedCall": correct or fallback["expectedCall"],
+        "tip": tip[:160] or default_tip(issues),
         "cfiAlert": str(cfi).strip() if cfi and role == "pilot" else None,
         "atcReply": (reply or fallback["atcReply"]) if want_reply else None,  # None after a readback
     }
@@ -188,17 +235,17 @@ def grade_transmission(
 ) -> dict[str, Any]:
     """Grade one transmission. Never raises; falls back to canned output.
 
-    Returns {"score", "issues", "expectedCall", "cfiAlert", "atcReply"}.
+    Returns {"score", "issues", "expectedCall", "tip", "cfiAlert", "atcReply"}. For pilot calls
+    expectedCall is the ideal call for this situation (Gemini's correctCall, else the scenario's).
     """
     phase = normalize_phase(phase)
     history = history or []
     fallback = fallback_grade(transcript, phase, role, want_reply, history)
     if demo_mode() or transcript is None or not env("GEMINI_API_KEY"):
-        return fallback
-
-    raw = call_with_timeout(
-        "Gemini", _call_gemini, transcript, phase, role, want_reply, history, fallback["expectedCall"]
-    )
-    if not isinstance(raw, dict):
-        return fallback
-    return _clean(raw, fallback, role, want_reply)
+        result = fallback
+    else:
+        raw = call_with_timeout(
+            "Gemini", _call_gemini, transcript, phase, role, want_reply, history, fallback["expectedCall"]
+        )
+        result = _clean(raw, fallback, role, want_reply) if isinstance(raw, dict) else fallback
+    return apply_atis_rule(result, transcript, phase, role, history)

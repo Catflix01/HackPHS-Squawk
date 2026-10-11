@@ -2,24 +2,87 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { diffCalls, type DiffWord } from "../wordDiff";
 
+type Call = {
+  id: string;
+  speaker: string;
+  phase: string;
+  transcript: string;
+  expectedCall: string;
+  score: number | null;
+  issues: string[];
+  tip?: string;
+  createdAt: string;
+};
+type Highlight = { id: string; phase: string; score: number; transcript: string; tip: string } | null;
 type Debrief = {
   sessionId: string;
   averageScore: number;
-  transmissions: Array<{
-    id: string;
-    speaker: string;
-    phase: string;
-    transcript: string;
-    expectedCall: string;
-    score: number | null;
-    issues: string[];
-    createdAt: string;
-  }>;
+  bestCall?: Highlight;
+  needsWork?: Highlight;
+  transmissions: Call[];
   cfiAlerts: { id: string; transmissionId: string; phase: string; text: string; createdAt: string }[];
 };
 
 const serverBaseUrl = process.env.NEXT_PUBLIC_SERVER_URL ?? "http://localhost:8000";
+
+const scoreColor = (score: number) => (score >= 85 ? "text-[#39ff88]" : score >= 70 ? "text-[#ffb000]" : "text-red-400");
+
+function Words({ words, missColor }: { words: DiffWord[]; missColor: string }) {
+  return (
+    <p className="leading-relaxed">
+      {words.map((item, index) => (
+        <span key={index}>
+          <span className={item.ok ? "text-slate-200" : `${missColor} font-bold underline decoration-2 underline-offset-4`}>{item.word}</span>{" "}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+function CallCard({ call, index }: { call: Call; index: number }) {
+  const diff = diffCalls(call.transcript, call.expectedCall);
+  const score = call.score ?? 0;
+  return (
+    <article className="rounded-xl border border-[#1c2a45] bg-[#0b1426] p-4">
+      <div className="flex items-center justify-between font-mono text-xs tracking-widest text-slate-500">
+        <span>CALL {index + 1} · {call.phase.toUpperCase()}</span>
+        <span className={`text-lg font-bold ${scoreColor(score)}`}>{score}</span>
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-[#1c2a45] bg-black/40 p-3">
+          <p className="mb-1 font-mono text-[10px] tracking-[0.25em] text-slate-500">YOU SAID</p>
+          <Words words={diff.said} missColor="text-red-400 decoration-red-400" />
+        </div>
+        <div className="rounded-lg border border-[#39ff88]/25 bg-black/40 p-3">
+          <p className="mb-1 font-mono text-[10px] tracking-[0.25em] text-[#39ff88]">CORRECT CALL</p>
+          <Words words={diff.correct} missColor="text-[#ffb000] decoration-[#ffb000]" />
+        </div>
+      </div>
+      {call.issues.length > 0 && (
+        <ul className="mt-3 list-disc pl-5 text-sm text-[#ffcf66]">{call.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
+      )}
+      {call.tip && <p className="mt-3 text-sm text-sky-200"><span className="font-mono font-bold text-[#ffb000]">CFI TIP · </span>{call.tip}</p>}
+    </article>
+  );
+}
+
+function SummaryCard({ label, call, tone }: { label: string; call: Highlight | undefined; tone: string }) {
+  return (
+    <div className={`rounded-xl border bg-[#0b1426] p-3 ${tone}`}>
+      <p className="font-mono text-[10px] tracking-[0.25em]">{label}</p>
+      {call ? (
+        <>
+          <p className="mt-1 font-mono text-sm text-slate-400">{call.phase.toUpperCase()} · <span className={scoreColor(call.score)}>{call.score}</span></p>
+          <p className="mt-1 line-clamp-2 text-sm text-slate-200">&ldquo;{call.transcript}&rdquo;</p>
+        </>
+      ) : (
+        <p className="mt-1 text-sm text-slate-500">Nothing here: keep flying!</p>
+      )}
+    </div>
+  );
+}
 
 export default function DebriefPage() {
   const [sessionId, setSessionId] = useState("");
@@ -38,26 +101,46 @@ export default function DebriefPage() {
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Unable to load debrief."));
   }, []);
 
+  const pilotCalls = debrief?.transmissions.filter((call) => call.speaker === "pilot" && call.expectedCall) ?? [];
+
   return (
-    <main className="min-h-screen bg-slate-950 p-4 text-slate-100 sm:p-8">
-      <div className="mx-auto max-w-3xl space-y-4">
-        <header className="rounded-2xl border border-sky-400/30 bg-slate-900 p-5">
-          <p className="font-mono text-sm text-sky-300">SESSION {sessionId || "..."}</p>
-          <h1 className="mt-1 text-3xl font-bold text-sky-100">Flight debrief</h1>
-          {debrief && <p className="mt-3 font-mono text-2xl text-green-300">Average score: {debrief.averageScore}</p>}
+    <main className="min-h-screen bg-[#050a16] p-4 text-slate-100 sm:p-8">
+      <div className="mx-auto max-w-4xl space-y-4">
+        <header className="rounded-xl border border-[#1c2a45] bg-[#0b1426] p-5">
+          <p className="font-mono text-xs tracking-widest text-slate-500">SESSION {sessionId || "..."} · N123SQ</p>
+          <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
+            <h1 className="text-3xl font-bold text-[#ffb000]">Flight debrief</h1>
+            {debrief && (
+              <p className="font-mono">
+                <span className="mr-2 text-xs tracking-widest text-slate-500">OVERALL</span>
+                <span className={`text-4xl font-bold ${scoreColor(debrief.averageScore)}`}>{debrief.averageScore}</span>
+                <span className="text-slate-500">/100</span>
+              </p>
+            )}
+          </div>
+          {debrief && (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <SummaryCard label="BEST CALL" call={debrief.bestCall} tone="border-[#39ff88]/40 text-[#39ff88]" />
+              <SummaryCard label="NEEDS WORK" call={debrief.needsWork} tone="border-[#ffb000]/40 text-[#ffb000]" />
+            </div>
+          )}
+          <p className="mt-4 font-mono text-[11px] text-slate-500">
+            <span className="font-bold text-red-400 underline">red</span> = wrong or extra words you said ·{" "}
+            <span className="font-bold text-[#ffb000] underline">amber</span> = words missing from your call
+          </p>
         </header>
+
         {error && <div className="rounded-xl border border-red-400/50 bg-red-500/10 p-4 text-red-200">{error}</div>}
-        {debrief?.cfiAlerts.map((alert) => <div key={alert.id} className="rounded-xl border border-amber-300/50 bg-amber-300/10 p-4 text-amber-100"><strong>CFI ({alert.phase}):</strong> {alert.text}</div>)}
-        {debrief?.transmissions.map((call) => (
-          <article key={call.id} className="rounded-2xl border border-sky-400/20 bg-slate-900 p-4">
-            <div className="flex flex-wrap justify-between gap-2 text-xs font-mono text-slate-400"><span>{call.speaker.toUpperCase()} · {call.phase}</span>{typeof call.score === "number" && <span className={call.score >= 80 ? "text-green-300" : "text-amber-300"}>Score {call.score}</span>}</div>
-            <p className="mt-3 text-lg">{call.transcript}</p>
-            {call.expectedCall && <p className="mt-2 text-sm text-sky-200">Expected: {call.expectedCall}</p>}
-            {call.issues.length > 0 && <ul className="mt-2 list-disc pl-5 text-sm text-amber-200">{call.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
-          </article>
+        {debrief?.cfiAlerts.map((alert) => (
+          <div key={alert.id} className="rounded-xl border border-[#ffb000]/50 bg-[#ffb000]/10 p-4 text-[#ffe2a3]">
+            <strong className="font-mono text-[#ffb000]">CFI ({alert.phase}):</strong> {alert.text}
+          </div>
         ))}
-        <Link href={`/fly?session=${encodeURIComponent(sessionId)}`} className="block rounded-xl border border-sky-400/40 bg-sky-400/10 px-4 py-3 text-center text-sky-100">Back to flight deck</Link>
-        <footer className="text-center text-xs text-slate-500">Practice tool only. Not a substitute for flight instruction.</footer>
+        {debrief && pilotCalls.length === 0 && <p className="text-center text-sm text-slate-500">No pilot calls in this session yet.</p>}
+        {pilotCalls.map((call, index) => <CallCard key={call.id} call={call} index={index} />)}
+
+        <Link href={`/fly?session=${encodeURIComponent(sessionId)}`} className="block rounded-lg border border-[#ffb000]/40 px-4 py-3 text-center font-mono font-bold tracking-widest text-[#ffb000]">BACK TO FLIGHT DECK</Link>
+        <footer className="text-center text-xs text-slate-600">Practice tool only. Not a substitute for flight instruction.</footer>
       </div>
     </main>
   );

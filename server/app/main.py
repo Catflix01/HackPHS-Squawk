@@ -99,13 +99,15 @@ def _transmission_message(doc: dict[str, Any], audio_b64: str | None, mime_type:
         "expectedCall": doc["expectedCall"],
         "score": doc["score"],
         "issues": doc["issues"],
+        "tip": doc.get("tip", ""),
         "audioBase64": audio_b64,
         "mimeType": mime_type,
     }
 
 
 def _save_transmission(session_id: str, speaker: str, phase: str, transcript: str,
-                       expected_call: str, score: int | None, issues: list[str]) -> dict[str, Any]:
+                       expected_call: str, score: int | None, issues: list[str],
+                       tip: str = "") -> dict[str, Any]:
     doc = {
         "id": uuid.uuid4().hex,
         "sessionId": session_id,
@@ -115,6 +117,7 @@ def _save_transmission(session_id: str, speaker: str, phase: str, transcript: st
         "expectedCall": expected_call,
         "score": score,
         "issues": issues,
+        "tip": tip,
         "createdAt": _now(),
     }
     store.add_transmission(doc)
@@ -197,7 +200,7 @@ def transmit(
 
     doc = _save_transmission(
         sessionId, role, phase, transcript or TRANSCRIPT_UNAVAILABLE,
-        grade["expectedCall"], grade["score"], grade["issues"],
+        grade["expectedCall"], grade["score"], grade["issues"], grade.get("tip", ""),
     )
     # Human mode: relay the original audio so the other side hears the real voice.
     audio_b64 = _b64(audio_bytes) if mode == "human" else None
@@ -216,13 +219,26 @@ def debrief(session_id: str) -> dict[str, Any]:
     def iso(value: Any) -> str:
         return value.isoformat() if isinstance(value, datetime) else str(value)
 
-    pilot_scores = [
-        tx["score"] for tx in transmissions
+    scored = [
+        tx for tx in transmissions
         if tx.get("speaker") == "pilot" and isinstance(tx.get("score"), (int, float))
     ]
+    pilot_scores = [tx["score"] for tx in scored]
+
+    def highlight(tx: dict[str, Any] | None) -> dict[str, Any] | None:
+        if tx is None:
+            return None
+        return {"id": tx["id"], "phase": tx["phase"], "score": tx["score"],
+                "transcript": tx["transcript"], "tip": tx.get("tip", "")}
+
+    best = max(scored, key=lambda tx: tx["score"], default=None)
+    worst = min(scored, key=lambda tx: tx["score"], default=None)
+    needs_work = worst if worst is not None and worst is not best and worst["score"] < 85 else None
     return {
         "sessionId": session_id,
         "averageScore": round(sum(pilot_scores) / len(pilot_scores)) if pilot_scores else 0,
+        "bestCall": highlight(best),
+        "needsWork": highlight(needs_work),
         "transmissions": [
             {
                 "id": tx["id"],
@@ -232,6 +248,7 @@ def debrief(session_id: str) -> dict[str, Any]:
                 "expectedCall": tx["expectedCall"],
                 "score": tx["score"],
                 "issues": tx["issues"],
+                "tip": tx.get("tip", ""),
                 "createdAt": iso(tx["createdAt"]),
             }
             for tx in transmissions

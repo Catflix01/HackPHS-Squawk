@@ -53,9 +53,11 @@ Server pipeline: transcribe → grade with Gemini against the expected call → 
 {
   "sessionId": "DEMO",
   "averageScore": 87,
+  "bestCall": {"id": "...", "phase": "taxi", "score": 98, "transcript": "...", "tip": "..."},
+  "needsWork": {"id": "...", "phase": "landing", "score": 60, "transcript": "...", "tip": "..."},
   "transmissions": [
     {"id": "...", "speaker": "pilot", "phase": "taxi", "transcript": "...", "expectedCall": "...",
-     "score": 90, "issues": ["..."], "createdAt": "2026-10-10T20:20:08.257015+00:00"}
+     "score": 90, "issues": ["..."], "tip": "...", "createdAt": "2026-10-10T20:20:08.257015+00:00"}
   ],
   "cfiAlerts": [
     {"id": "...", "transmissionId": "...", "phase": "taxi", "text": "...", "createdAt": "..."}
@@ -64,6 +66,15 @@ Server pipeline: transcribe → grade with Gemini against the expected call → 
 ```
 
 - `averageScore`: the rounded mean of the **pilot** transmission scores, or `0` if there are none.
+- `bestCall`: the highest-scoring pilot call, or `null` if there are none. `needsWork`: the
+  lowest-scoring pilot call, only if it is a different call and scores below 85; otherwise `null`.
+- `expectedCall` (pilot calls) is the **correct call** for that situation: Gemini's ideal version of
+  what the pilot was trying to say, using the scenario's facility, callsign and runway, or the scenario's
+  expected call or readback when Gemini isn't available. The `/debrief` page diffs it word by word
+  against `transcript`.
+- `tip`: a one-line CFI coaching tip for that call (`""` for tower transmissions).
+- ATIS rule: an initial pilot call in the `taxi` phase that doesn't say "information Alpha" or
+  "with Alpha" loses 5 points, gets the issue `Missing ATIS: ...`, and gets an ATIS tip.
 - `transmissions` are in chronological order. For `ai_atc` entries, `score` is `null`, `issues` is `[]`
   and `expectedCall` is `""`.
 
@@ -166,7 +177,7 @@ summarised as `"<title> (<minutes> min)"`. Unknown plan → 404.
 | `{"type":"ptt.denied","reason":"freq_busy"}` | only the requester |
 | `{"type":"device.ptt","state":"down"\|"up"}` | pilot browsers, when the Pi button is pressed or released (only if the press was granted) |
 | `{"type":"phase.changed","phase"}` | everyone |
-| `{"type":"transmission","id","speaker":"pilot"\|"atc"\|"ai_atc","phase","transcript","expectedCall","score","issues":[],"audioBase64":string\|null,"mimeType":"audio/webm"\|"audio/mpeg"}` | everyone in the session. **Clients play audio only if `speaker` != their own role.** |
+| `{"type":"transmission","id","speaker":"pilot"\|"atc"\|"ai_atc","phase","transcript","expectedCall","score","issues":[],"tip","audioBase64":string\|null,"mimeType":"audio/webm"\|"audio/mpeg"}` | everyone in the session. **Clients play audio only if `speaker` != their own role.** |
 | `{"type":"cfi.alert","text","audioBase64","mimeType":"audio/mpeg"}` | pilot only |
 | `{"type":"rx","state":"started"\|"stopped"}` | device only (forwarded from the pilot browser) |
 
