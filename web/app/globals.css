@@ -1,19 +1,122 @@
 @import "tailwindcss";
 
+/* Squawk design tokens: night cockpit palette. */
 :root {
-  --background: #020617;
-  --foreground: #e2e8f0;
+  --sq-bg: #0b1526;
+  --sq-panel: #10203a;
+  --sq-line: #29466b;
+  --sq-text: #e6edf5;
+  --sq-muted: #9fb2c8;
+  --sq-amber: #f5b83d;
+  --sq-success: #3fb27f;
+  --sq-red: #d64545;
+  --sq-info: #4a9bd9;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: Arial, Helvetica, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --color-bg: var(--sq-bg);
+  --color-panel: var(--sq-panel);
+  --color-line: var(--sq-line);
+  --color-text: var(--sq-text);
+  --color-muted: var(--sq-muted);
+  --color-amber: var(--sq-amber);
+  --color-success: var(--sq-success);
+  --color-red: var(--sq-red);
+  --color-info: var(--sq-info);
+  --color-background: var(--sq-bg);
+  --color-foreground: var(--sq-text);
+
+  --font-display: var(--font-big-shoulders), "Arial Narrow", sans-serif;
+  --font-sans: var(--font-b612), Arial, sans-serif;
+  --font-mono: var(--font-b612-mono), ui-monospace, Menlo, monospace;
+
+  /* Remap Tailwind palettes used across pages onto the design palette. */
+  --color-slate-950: var(--sq-bg);
+  --color-slate-900: var(--sq-panel);
+  --color-slate-800: var(--sq-line);
+  --color-slate-700: var(--sq-line);
+  --color-slate-600: var(--sq-muted);
+  --color-slate-500: var(--sq-muted);
+  --color-slate-400: var(--sq-muted);
+  --color-slate-300: var(--sq-text);
+  --color-slate-200: var(--sq-text);
+  --color-slate-100: var(--sq-text);
+  --color-sky-950: var(--sq-panel);
+  --color-sky-900: var(--sq-panel);
+  --color-sky-500: var(--sq-info);
+  --color-sky-400: var(--sq-info);
+  --color-sky-300: var(--sq-info);
+  --color-sky-200: var(--sq-text);
+  --color-sky-100: var(--sq-text);
+  --color-amber-400: var(--sq-amber);
+  --color-amber-300: var(--sq-amber);
+  --color-amber-200: var(--sq-amber);
+  --color-amber-100: var(--sq-text);
+  --color-amber-50: var(--sq-text);
+  --color-green-400: var(--sq-success);
+  --color-green-300: var(--sq-success);
+  --color-green-200: var(--sq-success);
+  --color-green-100: var(--sq-text);
+  --color-red-500: var(--sq-red);
+  --color-red-400: var(--sq-red);
+  --color-red-300: var(--sq-red);
+  --color-red-200: var(--sq-red);
+  --color-red-100: var(--sq-text);
+
+  /* Max radius 4px (rounded-full stays for the PTT control and avatars). */
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+  --radius-2xl: 4px;
+  --radius-3xl: 4px;
+
+  /* No drop shadows anywhere. */
+  --shadow-2xs: none;
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+  --shadow-2xl: none;
+  --drop-shadow-xs: none;
+  --drop-shadow-sm: none;
+  --drop-shadow-md: none;
+  --drop-shadow-lg: none;
+  --drop-shadow-xl: none;
+  --drop-shadow-2xl: none;
+}
+
+html {
+  background: var(--sq-bg);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--sq-bg);
+  color: var(--sq-text);
+  font-family: var(--font-sans);
+}
+
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 72; /* Display optical size of Big Shoulders Stencil */
+  letter-spacing: 0.02em;
+}
+
+/* Cloud background: slow leftward drift, paused for reduced motion. */
+@keyframes sq-drift {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.sq-cloud-layer {
+  animation: sq-drift linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sq-cloud-layer {
+    animation-play-state: paused;
+  }
 }
