@@ -7,7 +7,7 @@ import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import anyio
@@ -22,8 +22,12 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from pydantic import BaseModel, Field, field_validator
 
 from . import config
+from .lessons import lesson_summary, load_lessons
+from .planner import build_plan, plan_to_ics
 from .scenario import normalize_phase
 from .services.llm import expected_call, grade_transmission
 from .services.stt import transcribe_audio
@@ -236,6 +240,64 @@ def debrief(session_id: str) -> dict[str, Any]:
             for alert in alerts
         ],
     }
+
+
+@app.get("/lessons")
+def list_lessons() -> dict[str, Any]:
+    return {"lessons": [lesson_summary(lesson) for lesson in load_lessons().values()]}
+
+
+@app.get("/lessons/{lesson_id}")
+def get_lesson(lesson_id: str) -> dict[str, Any]:
+    lesson = load_lessons().get(lesson_id)
+    if lesson is None:
+        raise HTTPException(status_code=404, detail="lesson not found")
+    return lesson
+
+
+class PlannerRequest(BaseModel):
+    lessonDates: list[date] = Field(default_factory=list)
+    examDates: list[date] = Field(default_factory=list)
+    minutesPerDay: int = Field(default=20, ge=5, le=240)
+    startDate: date | None = None
+    # Single-date aliases sent by the /planner page (merged into the lists above).
+    flightDate: date | None = None
+    examDate: date | None = None
+    minutes: int | None = Field(default=None, ge=5, le=240)
+
+    @field_validator("startDate", "flightDate", "examDate", mode="before")
+    @classmethod
+    def _blank_is_none(cls, value: Any) -> Any:
+        return None if value == "" else value  # empty <input type="date"> sends ""
+
+
+@app.post("/planner")
+def create_plan(request: PlannerRequest) -> dict[str, Any]:
+    start = request.startDate or _now().date()
+    lesson_dates = request.lessonDates + ([request.flightDate] if request.flightDate else [])
+    exam_dates = request.examDates + ([request.examDate] if request.examDate else [])
+    minutes = request.minutes if request.minutes is not None else request.minutesPerDay
+    items = build_plan(lesson_dates, exam_dates, minutes, start)
+    plan_id = uuid.uuid4().hex[:12]
+    store.add_plan({
+        "planId": plan_id,
+        "request": request.model_dump(mode="json"),
+        "planItems": items,
+        "createdAt": _now(),
+    })
+    return {"planId": plan_id, "planItems": items}
+
+
+@app.get("/planner/{plan_id}.ics")
+def plan_calendar(plan_id: str) -> Response:
+    plan = store.get_plan(plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="plan not found")
+    return Response(
+        content=plan_to_ics(plan_id, plan["planItems"]),
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="squawk-plan-{plan_id}.ics"'},
+    )
 
 
 @app.websocket("/ws/session/{session_id}")

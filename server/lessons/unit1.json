@@ -1,0 +1,33 @@
+{
+  "id": "unit1",
+  "title": "Radio basics",
+  "brief": "Every radio call answers three questions: who you are calling, who you are, and what you want. Keep it short, use standard phraseology, and read back every clearance, runway and hold-short instruction so the controller can catch mistakes before they become dangerous.",
+  "scenarioId": "vfr_pattern",
+  "flashcards": [
+    {
+      "id": "u1-phraseology",
+      "front": "What is the order of an initial call to a tower?",
+      "back": "Who you're calling, who you are, where you are, what you want: \"Squawk Tower, Cessna one two three Sierra Quebec, at the main ramp with information Alpha, request taxi.\""
+    },
+    {
+      "id": "u1-readback",
+      "front": "Which instructions must you always read back?",
+      "back": "Runway assignments, hold short instructions, and clearances to take off, land, or enter or cross a runway. End the readback with your callsign."
+    },
+    {
+      "id": "u1-callsign",
+      "front": "When may you shorten your callsign to \"Cessna three Sierra Quebec\"?",
+      "back": "Only after the controller has abbreviated it first. Until then, use the full callsign: \"Cessna one two three Sierra Quebec\"."
+    },
+    {
+      "id": "u1-wilco",
+      "front": "What does \"wilco\" mean?",
+      "back": "\"I have received your message, understand, and will comply.\" Don't say \"roger wilco\": wilco already includes roger."
+    },
+    {
+      "id": "u1-say-again",
+      "front": "What do you say if you didn't understand a transmission?",
+      "back": "\"Say again.\" For example: \"Squawk Tower, Cessna three Sierra Quebec, say again.\" Never guess at a clearance."
+    }
+  ]
+}

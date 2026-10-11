@@ -67,6 +67,66 @@ Server pipeline: transcribe → grade with Gemini against the expected call → 
 - `transmissions` are in chronological order. For `ai_atc` entries, `score` is `null`, `issues` is `[]`
   and `expectedCall` is `""`.
 
+### `GET /lessons`
+
+```json
+{"lessons": [{"id": "unit1", "title": "Radio basics", "brief": "...", "scenarioId": "vfr_pattern", "flashcardCount": 5}]}
+```
+
+### `GET /lessons/{id}`
+
+```json
+{
+  "id": "unit1",
+  "title": "Radio basics",
+  "brief": "...",
+  "scenarioId": "vfr_pattern",
+  "flashcards": [{"id": "u1-wilco", "front": "What does \"wilco\" mean?", "back": "..."}]
+}
+```
+
+Unknown id → 404. Lessons are JSON files in `server/lessons/`. `scenarioId` is the `/fly` scenario
+to practise with.
+
+### `POST /planner` (JSON)
+
+```json
+{"lessonDates": ["2026-11-05"], "examDates": ["2026-11-12"], "minutesPerDay": 20, "startDate": "2026-11-01"}
+```
+
+All dates are `YYYY-MM-DD`. `lessonDates` are flight lessons. `minutesPerDay` is 5–240 (default 20).
+`startDate` defaults to today. Invalid input → 422.
+Also accepted, for the current `/planner` page: single `flightDate` / `examDate` (merged into the
+lists) and `minutes` (overrides `minutesPerDay`). Empty-string dates are ignored. Each plan item also
+carries `lesson`, a copy of `title`.
+
+Response:
+
+```json
+{
+  "planId": "a1b2c3d4e5f6",
+  "planItems": [{"date": "2026-11-01", "type": "practice", "title": "Radio practice: ...", "minutes": 20}]
+}
+```
+
+- One item per day, from `startDate` through the last lesson or exam date, at least 14 and at most 30 days.
+- `type`, from highest priority to lowest:
+
+  | type | when | minutes |
+  |---|---|---|
+  | `exam` | an exam date | short warm-up, at most 10 |
+  | `flight` | a flight lesson date | short warm-up, at most 10 |
+  | `light` | the day before a flight lesson | half of `minutesPerDay` |
+  | `review` | the 3 days before an exam | 1.5× `minutesPerDay` |
+  | `practice` / `flashcards` / `lesson` | other days, rotating in that order | `minutesPerDay` |
+
+- Plans are kept in memory, and also saved to MongoDB when `MONGODB_URI` is set.
+
+### `GET /planner/{planId}.ics`
+
+Returns a `text/calendar` file (sent as an attachment) with one all-day event per plan item,
+summarised as `"<title> (<minutes> min)"`. Unknown plan → 404.
+
 ---
 
 ## WebSocket `/ws/session/{sessionId}?role=pilot|atc|device`

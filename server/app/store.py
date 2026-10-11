@@ -24,6 +24,7 @@ class Store:
         self._lock = threading.Lock()
         self._transmissions: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self._alerts: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self._plans: dict[str, dict[str, Any]] = {}
         self._client: MongoClient | None = None
         self._db = None
         self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="squawk-mongo")
@@ -73,7 +74,23 @@ class Store:
             self._alerts[doc["sessionId"]].append(doc)
         self._persist("cfi_alerts", doc)
 
+    def add_plan(self, doc: dict[str, Any]) -> None:
+        with self._lock:
+            self._plans[doc["planId"]] = doc
+        self._persist("plans", doc)
+
     # -- reads -----------------------------------------------------------
+    def get_plan(self, plan_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            plan = self._plans.get(plan_id)
+        if plan is not None or self._db is None:
+            return plan
+        try:
+            return self._db["plans"].find_one({"planId": plan_id}, {"_id": 0})
+        except Exception as exc:
+            logger.warning("Mongo read failed: %s", exc)
+            return None
+
     def recent(self, session_id: str, limit: int = 6) -> list[dict[str, Any]]:
         with self._lock:
             return list(self._transmissions.get(session_id, [])[-limit:])
