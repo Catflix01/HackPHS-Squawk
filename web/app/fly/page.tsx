@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Gauges } from "./components/Gauges";
+import { type Atis, Kneeboard } from "./components/Kneeboard";
 import { RadioStack } from "./components/RadioStack";
 
 type Role = "pilot" | "atc";
@@ -64,6 +65,9 @@ export default function FlyPage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [busyFlash, setBusyFlash] = useState(false);
   const [awaitingTower, setAwaitingTower] = useState(false);
+  const [atis, setAtis] = useState<Atis | null>(null);
+  const [atisLoading, setAtisLoading] = useState(false);
+  const [atisError, setAtisError] = useState<string | null>(null);
   const [receiving, setReceiving] = useState(false); // display only (RX light)
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -219,6 +223,30 @@ export default function FlyPage() {
     },
     [playClip],
   );
+
+  // ATIS 127.65: fetch the broadcast and play it through the same radio queue as the tower
+  // (ducking, rx light, PTT clears it). Browser speech if the server has no audio.
+  const listenToAtis = useCallback(async () => {
+    setAtisLoading(true);
+    setAtisError(null);
+    try {
+      const response = await fetch(`${serverBaseUrl}/atis`);
+      if (!response.ok) throw new Error(`ATIS unavailable (${response.status})`);
+      const data = (await response.json()) as Atis;
+      setAtis(data);
+      if (data.audioBase64) {
+        enqueueAudio(data.audioBase64, "audio/mpeg", "atis");
+      } else if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(data.script));
+      }
+    } catch (error) {
+      console.warn("[atis] could not load the ATIS", error);
+      setAtisError("ATIS unavailable. Check that the server is running.");
+    } finally {
+      setAtisLoading(false);
+    }
+  }, [enqueueAudio]);
 
   const stopPlayback = useCallback(() => {
     queueGenerationRef.current += 1;
@@ -498,6 +526,8 @@ export default function FlyPage() {
         ))}
 
         <Gauges phase={phase} />
+
+        <Kneeboard atis={atis} loading={atisLoading} error={atisError} highlight={phase === "taxi"} onListen={() => void listenToAtis()} />
 
         <section className="grid grid-cols-4 gap-1 rounded border border-[#29466B] bg-[#10203A] p-1" aria-label="Flight phase">
           {PHASES.map((item, index) => {
