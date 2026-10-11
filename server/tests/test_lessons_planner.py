@@ -47,7 +47,7 @@ def test_planner_rules_and_ics(client):
     body = response.json()
     items = body["planItems"]
     assert 14 <= len(items) <= 30
-    assert all(set(item) == {"date", "type", "title", "minutes"} for item in items)
+    assert all({"date", "type", "title", "minutes"} <= set(item) for item in items)
     days = by_date(items)
 
     assert days["2026-11-05"]["type"] == "flight"
@@ -76,3 +76,17 @@ def test_planner_length_bounds(client):
 def test_planner_validation_and_missing_plan(client):
     assert client.post("/planner", json={"lessonDates": ["not-a-date"]}).status_code == 422
     assert client.get("/planner/doesnotexist.ics").status_code == 404
+
+
+def test_planner_accepts_planner_page_fields(client):
+    # The /planner page sends single dates + "minutes" and renders item.lesson.
+    items = client.post("/planner", json={
+        "startDate": "2026-11-01", "flightDate": "2026-11-05", "examDate": "2026-11-12", "minutes": 30,
+    }).json()["planItems"]
+    days = by_date(items)
+    assert days["2026-11-05"]["type"] == "flight"
+    assert days["2026-11-12"]["type"] == "exam"
+    assert days["2026-11-01"]["minutes"] == 30
+    assert all(item["lesson"] == item["title"] for item in items)
+    blank = client.post("/planner", json={"flightDate": "", "examDate": "", "minutes": 15})
+    assert blank.status_code == 200

@@ -27,3 +27,7 @@ export async function postWithFallback<T>(
     return fallback;
   }
 }
+
+// Short names used by the Hangar/lessons/planner pages; same functions, no duplicate logic.
+export const fetchFallback = fetchWithFallback;
+export const postFallback = postWithFallback;

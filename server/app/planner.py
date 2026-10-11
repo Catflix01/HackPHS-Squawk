@@ -68,6 +68,7 @@ def build_plan(lesson_dates: list[date], exam_dates: list[date], minutes_per_day
             "type": kind,
             "title": title,
             "minutes": _clamp_minutes(minutes),
+            "lesson": title,  # same as title; the /planner page renders item.lesson
         })
     return items
 

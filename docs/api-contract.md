@@ -96,6 +96,9 @@ to practise with.
 
 All dates are `YYYY-MM-DD`. `lessonDates` are flight lessons. `minutesPerDay` is 5–240 (default 20).
 `startDate` defaults to today. Invalid input → 422.
+Also accepted, for the current `/planner` page: single `flightDate` / `examDate` (merged into the
+lists) and `minutes` (overrides `minutesPerDay`). Empty-string dates are ignored. Each plan item also
+carries `lesson`, a copy of `title`.
 
 Response:
 

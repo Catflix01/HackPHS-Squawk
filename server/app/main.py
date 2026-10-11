@@ -23,7 +23,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import config
 from .lessons import lesson_summary, load_lessons
@@ -260,12 +260,24 @@ class PlannerRequest(BaseModel):
     examDates: list[date] = Field(default_factory=list)
     minutesPerDay: int = Field(default=20, ge=5, le=240)
     startDate: date | None = None
+    # Single-date aliases sent by the /planner page (merged into the lists above).
+    flightDate: date | None = None
+    examDate: date | None = None
+    minutes: int | None = Field(default=None, ge=5, le=240)
+
+    @field_validator("startDate", "flightDate", "examDate", mode="before")
+    @classmethod
+    def _blank_is_none(cls, value: Any) -> Any:
+        return None if value == "" else value  # empty <input type="date"> sends ""
 
 
 @app.post("/planner")
 def create_plan(request: PlannerRequest) -> dict[str, Any]:
     start = request.startDate or _now().date()
-    items = build_plan(request.lessonDates, request.examDates, request.minutesPerDay, start)
+    lesson_dates = request.lessonDates + ([request.flightDate] if request.flightDate else [])
+    exam_dates = request.examDates + ([request.examDate] if request.examDate else [])
+    minutes = request.minutes if request.minutes is not None else request.minutesPerDay
+    items = build_plan(lesson_dates, exam_dates, minutes, start)
     plan_id = uuid.uuid4().hex[:12]
     store.add_plan({
         "planId": plan_id,
