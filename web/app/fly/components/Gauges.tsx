@@ -52,7 +52,7 @@ const arc = (fromDeg: number, toDeg: number, radius: number) => {
 
 function Bezel({ children, title, readout }: { children: React.ReactNode; title: string; readout: string }) {
   return (
-    <figure className="flex flex-col items-center rounded border border-[#29466B] bg-[#10203A] p-2">
+    <figure className="flex flex-col items-center rounded border border-line bg-panel p-2">
       <svg viewBox="0 0 200 200" className="w-full max-w-[11rem]" role="img" aria-label={`${title} ${readout}`}>
         <circle cx="100" cy="100" r="96" fill="#02060e" stroke="#29466B" strokeWidth="4" />
         {children}
@@ -60,7 +60,7 @@ function Bezel({ children, title, readout }: { children: React.ReactNode; title:
       </svg>
       <figcaption className="mt-1 text-center font-mono">
         <span className="block text-[10px] tracking-[0.25em] text-slate-500">{title}</span>
-        <span className="text-lg font-bold tabular-nums text-[#3FB27F]">{readout}</span>
+        <span className="text-lg font-bold tabular-nums text-success">{readout}</span>
       </figcaption>
     </figure>
   );
