@@ -52,15 +52,15 @@ const arc = (fromDeg: number, toDeg: number, radius: number) => {
 
 function Bezel({ children, title, readout }: { children: React.ReactNode; title: string; readout: string }) {
   return (
-    <figure className="flex flex-col items-center rounded-xl border border-[#1c2a45] bg-[#0b1426] p-2">
+    <figure className="flex flex-col items-center rounded border border-[#29466B] bg-[#10203A] p-2">
       <svg viewBox="0 0 200 200" className="w-full max-w-[11rem]" role="img" aria-label={`${title} ${readout}`}>
-        <circle cx="100" cy="100" r="96" fill="#02060e" stroke="#26344f" strokeWidth="4" />
+        <circle cx="100" cy="100" r="96" fill="#02060e" stroke="#29466B" strokeWidth="4" />
         {children}
-        <circle cx="100" cy="100" r="6" fill="#1c2a45" />
+        <circle cx="100" cy="100" r="6" fill="#29466B" />
       </svg>
       <figcaption className="mt-1 text-center font-mono">
         <span className="block text-[10px] tracking-[0.25em] text-slate-500">{title}</span>
-        <span className="text-lg font-bold tabular-nums text-[#39ff88]">{readout}</span>
+        <span className="text-lg font-bold tabular-nums text-[#3FB27F]">{readout}</span>
       </figcaption>
     </figure>
   );
@@ -88,7 +88,7 @@ function AirspeedIndicator({ knots }: { knots: number }) {
         return (
           <g key={i}>
             <line x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke="#cbd5e1" strokeWidth="2" />
-            {i % 4 === 0 && <text x={label.x} y={label.y + 5} textAnchor="middle" fontSize="14" fill="#ffb000" fontFamily="monospace">{i * 10}</text>}
+            {i % 4 === 0 && <text x={label.x} y={label.y + 5} textAnchor="middle" fontSize="14" fill="#F5B83D" fontFamily="monospace">{i * 10}</text>}
           </g>
         );
       })}
@@ -110,7 +110,7 @@ function Altimeter({ feet }: { feet: number }) {
       })}
       {Array.from({ length: 10 }, (_, i) => {
         const p = polar(i * 36, 63);
-        return <text key={i} x={p.x} y={p.y + 6} textAnchor="middle" fontSize="16" fill="#ffb000" fontFamily="monospace">{i}</text>;
+        return <text key={i} x={p.x} y={p.y + 6} textAnchor="middle" fontSize="16" fill="#F5B83D" fontFamily="monospace">{i}</text>;
       })}
       <Needle angle={(feet / 10000) * 360} length={45} width={7} />
       <Needle angle={((feet % 1000) / 1000) * 360} length={80} />
@@ -135,7 +135,7 @@ function HeadingIndicator({ heading }: { heading: number }) {
               <line x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke="#cbd5e1" strokeWidth={i % 3 === 0 ? 2.5 : 1} />
               {i % 3 === 0 && (
                 <text x={label.x} y={label.y + 6} textAnchor="middle" fontSize={cardinal[angle] ? 18 : 13}
-                  fill={cardinal[angle] ? "#ffb000" : "#cbd5e1"} fontFamily="monospace"
+                  fill={cardinal[angle] ? "#F5B83D" : "#cbd5e1"} fontFamily="monospace"
                   transform={`rotate(${angle} ${label.x} ${label.y})`}>
                   {cardinal[angle] ?? i}
                 </text>
@@ -144,8 +144,8 @@ function HeadingIndicator({ heading }: { heading: number }) {
           );
         })}
       </g>
-      <polygon points="100,4 94,16 106,16" fill="#ffb000" />
-      <path d="M100 74 L100 128 M78 100 L122 100 M90 122 L110 122" stroke="#ffb000" strokeWidth="4" strokeLinecap="round" />
+      <polygon points="100,4 94,16 106,16" fill="#F5B83D" />
+      <path d="M100 74 L100 128 M78 100 L122 100 M90 122 L110 122" stroke="#F5B83D" strokeWidth="4" strokeLinecap="round" />
     </Bezel>
   );
 }

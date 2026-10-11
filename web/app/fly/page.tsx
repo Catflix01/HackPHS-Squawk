@@ -462,7 +462,7 @@ export default function FlyPage() {
   const roleLabel = role === "pilot" ? "PILOT" : "TOWER";
 
   return (
-    <main className="min-h-screen bg-[#050a16] p-3 font-mono text-[#ffb000] sm:p-6">
+    <main className="min-h-screen bg-[#0B1526] p-3 font-mono text-[#F5B83D] sm:p-6">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
         <RadioStack
           active={{ label: "TWR", freq: "118.5" }}
@@ -477,79 +477,79 @@ export default function FlyPage() {
         />
 
         {warnings.length > 0 && (
-          <section className="rounded-lg border border-[#ffb000]/40 bg-[#ffb000]/10 p-3 text-xs text-[#ffcf66]">
-            {warnings.map((warning) => <p key={warning}>⚠ {warning}</p>)}
+          <section className="rounded border border-[#F5B83D]/40 bg-[#F5B83D]/10 p-3 text-xs text-[#F5B83D]">
+            {warnings.map((warning) => <p key={warning} className="flex items-start gap-2"><svg aria-hidden viewBox="0 0 16 16" className="mt-0.5 h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M8 1.5 15 14H1z" strokeLinejoin="round"/><path d="M8 6v4M8 11.5v.5" strokeLinecap="round"/></svg><span>{warning}</span></p>)}
           </section>
         )}
 
         {!flightStarted && (
-          <section className="rounded-xl border border-[#1c2a45] bg-[#0b1426] p-5 text-center">
+          <section className="rounded border border-[#29466B] bg-[#10203A] p-5 text-center">
             <p className="mb-3 text-sm text-slate-400">Connect your headset and start the flight deck before transmitting.</p>
-            <button type="button" onClick={() => void startFlight()} className="rounded-lg bg-[#ffb000] px-6 py-3 font-bold tracking-widest text-[#050a16] shadow-[0_0_18px_rgba(255,176,0,0.35)]">
+            <button type="button" onClick={() => void startFlight()} className="rounded bg-[#F5B83D] px-6 py-3 font-bold tracking-widest text-[#0B1526]">
               START FLIGHT
             </button>
           </section>
         )}
 
-        {busyFlash && <div className="rounded-lg border border-red-500/60 bg-red-500/15 p-2 text-center font-bold tracking-widest text-red-300">FREQ BUSY</div>}
-        {freqHolder && <div className="rounded-lg border border-[#ffb000]/50 bg-[#ffb000]/10 p-2 text-center text-sm tracking-wider">FREQ BUSY · {freqHolder.toUpperCase()} TRANSMITTING</div>}
+        {busyFlash && <div className="rounded border border-red-500/60 bg-red-500/15 p-2 text-center font-bold tracking-widest text-red-300">FREQ BUSY</div>}
+        {freqHolder && <div className="rounded border border-[#F5B83D]/50 bg-[#F5B83D]/10 p-2 text-center text-sm tracking-wider">FREQ BUSY · {freqHolder.toUpperCase()} TRANSMITTING</div>}
         {role === "pilot" && cfiAlerts.map((alert, index) => (
-          <div key={`${alert}-${index}`} className="rounded-lg border border-[#ffb000]/60 bg-[#ffb000]/10 p-3 font-sans text-sm text-[#ffe2a3]"><strong className="font-mono text-[#ffb000]">CFI:</strong> {alert}</div>
+          <div key={`${alert}-${index}`} className="rounded border border-[#F5B83D]/60 bg-[#F5B83D]/10 p-3 font-sans text-sm text-[#E6EDF5]"><strong className="font-mono text-[#F5B83D]">CFI:</strong> {alert}</div>
         ))}
 
         <Gauges phase={phase} />
 
-        <section className="grid grid-cols-4 gap-1 rounded-xl border border-[#1c2a45] bg-[#0b1426] p-1" aria-label="Flight phase">
+        <section className="grid grid-cols-4 gap-1 rounded border border-[#29466B] bg-[#10203A] p-1" aria-label="Flight phase">
           {PHASES.map((item, index) => {
             const current = PHASES.indexOf(phase);
             const style = item === phase
-              ? "bg-[#39ff88]/15 text-[#39ff88] border-[#39ff88]/60"
+              ? "bg-[#3FB27F]/15 text-[#3FB27F] border-[#3FB27F]/60"
               : index < current
-                ? "text-[#39ff88]/50 border-transparent"
+                ? "text-[#3FB27F]/50 border-transparent"
                 : "text-slate-500 border-transparent";
             return (
-              <button key={item} type="button" onClick={() => { setPhase(item); send({ type: "phase.set", phase: item }); }} className={`rounded-lg border px-2 py-2.5 text-xs font-bold uppercase tracking-widest sm:text-sm ${style}`}>
-                {index < current ? "✓ " : ""}{item}
+              <button key={item} type="button" onClick={() => { setPhase(item); send({ type: "phase.set", phase: item }); }} className={`rounded border px-2 py-2.5 text-xs font-bold uppercase tracking-widest sm:text-sm ${style}`}>
+                {index < current && <svg aria-hidden viewBox="0 0 16 16" className="mr-1 inline h-3 w-3 align-[-1px]" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M2.5 8.5 6 12l7.5-8" strokeLinecap="round" strokeLinejoin="round"/></svg>}{item}
               </button>
             );
           })}
         </section>
 
         <div className="grid gap-3 md:grid-cols-[auto_1fr]">
-          <section className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[#1c2a45] bg-[#0b1426] p-4">
+          <section className="flex flex-col items-center justify-center gap-2 rounded border border-[#29466B] bg-[#10203A] p-4">
             <button
               type="button"
               disabled={pttDisabled}
               onPointerDown={(event) => { event.preventDefault(); pressPtt(); }}
               onPointerUp={(event) => { event.preventDefault(); releasePtt(); }}
               onPointerCancel={releasePtt}
-              className={`h-40 w-40 rounded-full border-4 text-base font-bold uppercase tracking-wider transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${recording ? "border-red-500 bg-red-500/25 text-red-200 shadow-[0_0_30px_rgba(239,68,68,0.5)]" : "border-[#ffb000] bg-[#ffb000]/10 text-[#ffb000] shadow-[0_0_20px_rgba(255,176,0,0.2)]"}`}
+              className={`h-40 w-40 rounded-full border-4 text-base font-bold uppercase tracking-wider transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${recording ? "border-red-500 bg-red-500/25 text-red-200" : "border-[#F5B83D] bg-[#F5B83D]/10 text-[#F5B83D]"}`}
             >
               {recording ? "Transmitting" : "Hold to talk · Space"}
             </button>
-            {awaitingTower && <p className="animate-pulse text-xs tracking-widest text-[#39ff88]">TOWER RESPONDING…</p>}
+            {awaitingTower && <p className=" text-xs tracking-widest text-[#3FB27F]">TOWER RESPONDING…</p>}
           </section>
 
-          <section className="rounded-xl border border-[#1c2a45] bg-[#0b1426] p-3">
-            <h2 className="mb-2 text-xs font-bold uppercase tracking-[0.3em] text-[#39ff88]">Transcript</h2>
+          <section className="rounded border border-[#29466B] bg-[#10203A] p-3">
+            <h2 className="mb-2 text-xs font-bold uppercase tracking-[0.3em] text-[#3FB27F]">Transcript</h2>
             <div className="max-h-72 space-y-2 overflow-y-auto">
               {entries.length === 0 && <p className="text-xs text-slate-500">Your transmissions and tower replies will appear here.</p>}
               {entries.map((entry) => (
-                <article key={entry.id} className="rounded-md border border-[#1c2a45] bg-black/40 p-2.5 text-sm">
+                <article key={entry.id} className="rounded border border-[#29466B] bg-black/40 p-2.5 text-sm">
                   <p className="text-xs">
-                    <span className={`font-bold ${entry.speaker === role ? "text-[#ffb000]" : "text-[#39ff88]"}`}>{entry.speaker === "ai_atc" ? "TWR" : entry.speaker.toUpperCase()}</span>{" "}
+                    <span className={`font-bold ${entry.speaker === role ? "text-[#F5B83D]" : "text-[#3FB27F]"}`}>{entry.speaker === "ai_atc" ? "TWR" : entry.speaker.toUpperCase()}</span>{" "}
                     <span className="text-slate-500">· {entry.phase.toUpperCase()}</span>
-                    {typeof entry.score === "number" && <span className={`float-right ${entry.score >= 80 ? "text-[#39ff88]" : "text-[#ffb000]"}`}>SCORE {entry.score}</span>}
+                    {typeof entry.score === "number" && <span className={`float-right ${entry.score >= 80 ? "text-[#3FB27F]" : "text-[#F5B83D]"}`}>SCORE {entry.score}</span>}
                   </p>
                   <p className="mt-1 font-sans text-slate-100">{entry.transcript}</p>
-                  {entry.issues.length > 0 && <ul className="mt-1 list-disc pl-5 font-sans text-xs text-[#ffcf66]">{entry.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
+                  {entry.issues.length > 0 && <ul className="mt-1 list-disc pl-5 font-sans text-xs text-[#F5B83D]">{entry.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
                 </article>
               ))}
             </div>
           </section>
         </div>
 
-        <Link href={`/debrief/${encodeURIComponent(sessionId)}`} className="rounded-lg border border-[#ffb000]/40 px-4 py-2.5 text-center text-sm font-bold tracking-widest hover:bg-[#ffb000]/10">END FLIGHT · DEBRIEF</Link>
+        <Link href={`/debrief/${encodeURIComponent(sessionId)}`} className="rounded border border-[#F5B83D]/40 px-4 py-2.5 text-center text-sm font-bold tracking-widest hover:bg-[#F5B83D]/10">END FLIGHT · DEBRIEF</Link>
         <footer className="pb-3 text-center font-sans text-xs text-slate-600">Practice tool only. Not a substitute for flight instruction.</footer>
       </div>
     </main>
